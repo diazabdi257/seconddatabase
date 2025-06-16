@@ -54,13 +54,9 @@ class _MainScreenState extends State<MainScreen> {
                 Flexible(
                   child: Image.asset(
                     "assets/logo_cifut.png",
-                    height: 45, // Atur tinggi logo
+                    height: 50, // Atur tinggi logo
                     fit: BoxFit.contain, // Jaga agar tetap proporsional
                   ),
-                ),
-                IconButton(
-                  icon: const Icon(Icons.notifications, color: Colors.black),
-                  onPressed: () {},
                 ),
               ],
             ),

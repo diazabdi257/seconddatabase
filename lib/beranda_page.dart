@@ -95,7 +95,7 @@ class _BerandaPageState extends State<BerandaPage> {
                       ],
                     ),
                   ),
-                  const Icon(Icons.notifications, color: Colors.white),
+      
                 ],
               ),
             ),

@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart'; // Import FirebaseAuth
 import 'package:seconddatabase/edit_profile_page.dart';
-import 'package:seconddatabase/reset_password_verification_page.dart';
 import 'package:shared_preferences/shared_preferences.dart'; // Import shared_preferences
 import 'login_input.dart';
 
