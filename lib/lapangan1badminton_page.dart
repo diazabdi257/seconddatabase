@@ -6,7 +6,7 @@ import 'dart:convert';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:firebase_database/firebase_database.dart';
 import 'midtrans/midtranswebview_page.dart';
-import 'models/member_schedule.dart';
+import 'models/member_schedule.dart'; // Impor ini mungkin tidak digunakan langsung tapi relevan
 
 class Lapangan1BadmintonPage extends StatefulWidget {
   const Lapangan1BadmintonPage({Key? key}) : super(key: key);
@@ -62,7 +62,6 @@ class _Lapangan1BadmintonPageState extends State<Lapangan1BadmintonPage> {
     });
   }
 
-  // --- FUNGSI DENGAN PERBAIKAN LOGIKA PARSING ---
   Future<void> _fetchBookedAndMemberSlots(DateTime selectedDate) async {
     if (!mounted) return;
     setState(() {
@@ -73,13 +72,17 @@ class _Lapangan1BadmintonPageState extends State<Lapangan1BadmintonPage> {
 
     String formattedDate = DateFormat('yyyy-MM-dd').format(selectedDate);
     String firebaseBookingPath = '$sportNodeName/$fieldId/$formattedDate';
+    // PERBAIKAN: Definisikan path untuk jadwal member
+    String firebaseMemberPath = 'memberSchedules_badminton';
 
     print('Fetching regular bookings from path: $firebaseBookingPath');
+    print('Fetching member schedules from path: $firebaseMemberPath');
 
     try {
       Set<int> tempBookedHours = {};
       Set<int> tempMemberHours = {};
 
+      // 1. Fetch booking biasa (logika ini tetap sama)
       final eventBooking = await _databaseRef
           .child(firebaseBookingPath)
           .once()
@@ -91,8 +94,6 @@ class _Lapangan1BadmintonPageState extends State<Lapangan1BadmintonPage> {
         bookingsOnDate.forEach((uniqueBookingKey, bookingData) {
           if (bookingData is Map) {
             final booking = bookingData;
-
-            // PERBAIKAN: Cek field 'status' (dari website) ATAU 'payment_status' (dari aplikasi lama)
             String status =
                 (booking['status'] ?? booking['payment_status'] ?? '')
                     .toString()
@@ -106,30 +107,24 @@ class _Lapangan1BadmintonPageState extends State<Lapangan1BadmintonPage> {
 
               if (startTimeStr.isNotEmpty && endTimeStr.isNotEmpty) {
                 try {
-                  List<String> startParts = startTimeStr.split(':');
-                  List<String> endParts = endTimeStr.split(':');
-                  if (startParts.length == 2 && endParts.length == 2) {
-                    DateTime bookingStartTime = DateTime(
-                      selectedDate.year,
-                      selectedDate.month,
-                      selectedDate.day,
-                      int.parse(startParts[0]),
-                      int.parse(startParts[1]),
-                    );
-                    DateTime bookingEndTime = DateTime(
-                      selectedDate.year,
-                      selectedDate.month,
-                      selectedDate.day,
-                      int.parse(endParts[0]),
-                      int.parse(endParts[1]),
-                    );
-                    for (
-                      int hour = bookingStartTime.hour;
-                      hour < bookingEndTime.hour;
-                      hour++
-                    ) {
-                      tempBookedHours.add(hour);
-                    }
+                  DateTime bookingStartTime = DateTime(
+                    selectedDate.year,
+                    selectedDate.month,
+                    selectedDate.day,
+                    int.parse(startTimeStr.split(':')[0]),
+                  );
+                  DateTime bookingEndTime = DateTime(
+                    selectedDate.year,
+                    selectedDate.month,
+                    selectedDate.day,
+                    int.parse(endTimeStr.split(':')[0]),
+                  );
+                  for (
+                    int hour = bookingStartTime.hour;
+                    hour < bookingEndTime.hour;
+                    hour++
+                  ) {
+                    tempBookedHours.add(hour);
                   }
                 } catch (e) {
                   print(
@@ -142,16 +137,105 @@ class _Lapangan1BadmintonPageState extends State<Lapangan1BadmintonPage> {
         });
       }
 
-      // ... (Logika fetch jadwal member tetap sama) ...
+      // --- MULAI BLOK FETCH JADWAL MEMBER ---
+      // 2. Fetch jadwal member
+      Query memberQuery = _databaseRef
+          .child(firebaseMemberPath)
+          .orderByChild('fieldId')
+          .equalTo(fieldId);
+      final eventMember = await memberQuery.once().timeout(
+        const Duration(seconds: 15),
+      );
+      final snapshotMember = eventMember.snapshot;
+
+      if (snapshotMember.value != null && snapshotMember.value is Map) {
+        Map<dynamic, dynamic> memberSchedules =
+            snapshotMember.value as Map<dynamic, dynamic>;
+        memberSchedules.forEach((key, value) {
+          if (value is Map) {
+            final scheduleMap = value as Map<dynamic, dynamic>;
+
+            // Cek apakah jadwal member ini aktif.
+            // Asumsi: jika bookingType 'admin' atau payment_status 'success'/'confirmed', maka aktif.
+            String bookingType =
+                (scheduleMap['bookingType'] ?? '').toString().toLowerCase();
+            String paymentStatus =
+                (scheduleMap['payment_status'] ?? '').toString().toLowerCase();
+            bool isActiveMemberSchedule =
+                (bookingType == 'admin' ||
+                    paymentStatus == 'success' ||
+                    paymentStatus == 'confirmed');
+
+            if (isActiveMemberSchedule) {
+              int scheduleDayOfWeek =
+                  (scheduleMap['dayOfWeek'] as num?)?.toInt() ?? 0;
+              // Cek apakah hari pada jadwal member sama dengan hari pada tanggal yang dipilih
+              if (scheduleDayOfWeek == selectedDate.weekday) {
+                String firstDateStr = scheduleMap['firstDate'] ?? '';
+                int validityMonths =
+                    (scheduleMap['validityMonths'] as num?)?.toInt() ?? 0;
+
+                if (firstDateStr.isNotEmpty && validityMonths > 0) {
+                  try {
+                    DateTime firstDate = DateFormat(
+                      'yyyy-MM-dd',
+                    ).parse(firstDateStr);
+                    // Tambahkan bulan validitas untuk mendapatkan tanggal akhir
+                    DateTime memberScheduleEndDate = DateTime(
+                      firstDate.year,
+                      firstDate.month + validityMonths,
+                      firstDate.day,
+                    );
+
+                    // Cek apakah tanggal yang dipilih berada dalam masa berlaku membership
+                    if (!selectedDate.isBefore(firstDate) &&
+                        selectedDate.isBefore(memberScheduleEndDate)) {
+                      String scheduleStartTimeStr =
+                          scheduleMap['startTime'] ?? '';
+                      String scheduleEndTimeStr = scheduleMap['endTime'] ?? '';
+
+                      if (scheduleStartTimeStr.isNotEmpty &&
+                          scheduleEndTimeStr.isNotEmpty) {
+                        int startHour = int.parse(
+                          scheduleStartTimeStr.split(':')[0],
+                        );
+                        int endHour = int.parse(
+                          scheduleEndTimeStr.split(':')[0],
+                        );
+
+                        // Tambahkan semua jam dalam rentang jadwal member ke set
+                        for (int hour = startHour; hour < endHour; hour++) {
+                          tempMemberHours.add(hour);
+                        }
+                      }
+                    }
+                  } catch (e) {
+                    print(
+                      "Error parsing member schedule date for key $key: $e",
+                    );
+                  }
+                }
+              }
+            }
+          }
+        });
+      }
+      // --- AKHIR BLOK FETCH JADWAL MEMBER ---
 
       if (mounted) {
         setState(() {
           _bookedHoursForSelectedDate = tempBookedHours;
-          _memberReservedHours = tempMemberHours;
+          _memberReservedHours =
+              tempMemberHours; // Terapkan jam member yang sudah di-fetch
         });
       }
     } catch (e) {
       print('Error fetching slots: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Gagal memuat jadwal: ${e.toString()}')),
+        );
+      }
     } finally {
       if (mounted) {
         setState(() {
@@ -160,6 +244,8 @@ class _Lapangan1BadmintonPageState extends State<Lapangan1BadmintonPage> {
       }
     }
   }
+
+  // --- Sisa kode (seperti _initiatePayment, build, dll.) tetap sama dan tidak perlu diubah ---
 
   Future<void> _saveBookingToFirebase({
     required DatabaseReference bookingRef,
@@ -192,10 +278,7 @@ class _Lapangan1BadmintonPageState extends State<Lapangan1BadmintonPage> {
       _isLoading = true;
     });
 
-    // --- PERUBAHAN UTAMA: GUNAKAN FIREBASE PUSH() UNTUK KEY ---
     String formattedDateForPath = DateFormat('yyyy-MM-dd').format(dateBooking!);
-
-    // 1. Buat referensi baru dengan key unik dari Firebase
     DatabaseReference newBookingRef =
         _databaseRef
             .child(sportNodeName)
@@ -203,21 +286,17 @@ class _Lapangan1BadmintonPageState extends State<Lapangan1BadmintonPage> {
             .child(formattedDateForPath)
             .push();
 
-    // 2. Dapatkan key unik tersebut
     String firebaseKey = newBookingRef.key!;
-
-    // 3. Gunakan key dari Firebase untuk membuat orderId yang unik
     String dateForOrderId = DateFormat('yyyyMMdd').format(dateBooking!);
     String orderIdForMidtrans = '$orderPrefix-$dateForOrderId$firebaseKey';
 
     String itemNameForPayload =
         'Booking ${pageTitle.split(" - ")[0]} (${selectedHourIndexes.length} Jam)';
 
-    // PERBAIKAN FORMAT: Menyamakan format dengan data website
     Map<String, dynamic> bookingDataForFirebase = {
       'bookingDate': formattedDateForPath,
       'endTime': DateFormat('HH:mm').format(endTime!),
-      'fieldId': 1, // Simpan sebagai string, konsisten dengan aplikasi
+      'fieldId': fieldId, // Diubah menjadi String agar konsisten
       'fullName': fullName,
       'gross_amount': totalPrice,
       'key': firebaseKey,
@@ -225,10 +304,9 @@ class _Lapangan1BadmintonPageState extends State<Lapangan1BadmintonPage> {
       'phoneNumber': "",
       'scheduleChangeCount': 1,
       'startTime': DateFormat('HH:mm').format(startTime!),
-      'status': 'pending', // Hanya gunakan field 'status' untuk konsistensi
+      'status': 'pending',
       'timestamp': ServerValue.timestamp,
       'userName': email,
-      // 'b_id' tidak lagi dibuat oleh aplikasi
     };
 
     try {
@@ -255,7 +333,6 @@ class _Lapangan1BadmintonPageState extends State<Lapangan1BadmintonPage> {
           final responseData = jsonDecode(response.body);
           final String? snapToken = responseData['snapToken'];
           if (snapToken != null) {
-            // Gunakan referensi yang sudah dibuat (dengan key unik) untuk menyimpan data
             await _saveBookingToFirebase(
               bookingRef: newBookingRef,
               bookingData: bookingDataForFirebase,
@@ -623,7 +700,7 @@ class _Lapangan1BadmintonPageState extends State<Lapangan1BadmintonPage> {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        "Tanggal: ${DateFormat('EEEE, dd MMMM yyyy', 'id_ID').format(dateBooking!)}",
+                        "Tanggal: ${DateFormat('EEEE, dd MMMM yy', 'id_ID').format(dateBooking!)}",
                         style: const TextStyle(
                           fontSize: 16,
                           fontWeight: FontWeight.normal,

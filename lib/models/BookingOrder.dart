@@ -2,16 +2,16 @@
 import 'package:intl/intl.dart';
 
 class BookingOrder {
-  final String bookingDate; // Disimpan sebagai "yyyy-MM-dd"
-  final String endTime; // Disimpan sebagai "HH:mm"
+  final String bookingDate;
+  final String endTime;
   final String fieldId;
   final int grossAmount;
-  final String key; // Key unik dari Firebase path
+  final String key;
   final String midtransOrderId;
   final String paymentStatus;
-  final String startTime; // Disimpan sebagai "HH:mm"
-  final num timestamp; // Disimpan sebagai millisecondsSinceEpoch
-  final String userName; // Email pengguna
+  final String startTime;
+  final num timestamp;
+  final String userName;
   final int scheduleChangeCount;
 
   // Derived properties
@@ -31,7 +31,6 @@ class BookingOrder {
     required this.userName,
     required this.scheduleChangeCount,
   }) {
-    // Logika untuk mendapatkan sportType dan fieldDisplayName dari B_id atau fieldId
     if (midtransOrderId.toUpperCase().startsWith('BADMINTON')) {
       sportType = 'Badminton';
       fieldDisplayName = fieldId.replaceFirstMapped(
@@ -44,9 +43,8 @@ class BookingOrder {
         RegExp(r'lapangan(\d+)'),
         (match) => 'Lapangan ${match.group(1)}',
       );
-      // Anda bisa menambahkan logika untuk sport lain jika ada
     } else {
-      sportType = 'Olahraga Lain'; // Default jika tidak dikenali
+      sportType = 'Olahraga Lain';
       fieldDisplayName = fieldId;
     }
   }
@@ -56,10 +54,16 @@ class BookingOrder {
       key: key,
       bookingDate: map['bookingDate'] ?? '',
       endTime: map['endTime'] ?? '',
-      fieldId: map['fieldId'] ?? '',
+      fieldId: map['fieldId']?.toString() ?? '',
       grossAmount: (map['gross_amount'] as num?)?.toInt() ?? 0,
       midtransOrderId: map['midtrans_order_id'] ?? '',
-      paymentStatus: map['payment_status'] ?? 'unknown',
+
+      // PERBAIKAN UTAMA DI SINI:
+      // Membaca field 'status' DULU, jika tidak ada baru 'payment_status'.
+      // Jika keduanya tidak ada, baru default ke 'unknown'.
+      paymentStatus:
+          (map['status'] ?? map['payment_status'] ?? 'unknown').toString(),
+
       startTime: map['startTime'] ?? '',
       timestamp: map['timestamp'] as num? ?? 0,
       userName: map['userName'] ?? '',
@@ -73,7 +77,7 @@ class BookingOrder {
       return DateFormat('EEEE, dd MMMM yyyy', 'id_ID').format(date);
     } catch (e) {
       print("Error parsing date for display: $bookingDate - $e");
-      return bookingDate; // Fallback jika parsing gagal
+      return bookingDate;
     }
   }
 
@@ -83,21 +87,19 @@ class BookingOrder {
 
   int get durationInHours {
     try {
-      // Asumsi startTime dan endTime adalah string "HH:mm"
       final startHour = int.parse(startTime.split(':')[0]);
       final startMinute = int.parse(startTime.split(':')[1]);
       final endHour = int.parse(endTime.split(':')[0]);
       final endMinute = int.parse(endTime.split(':')[1]);
 
-      // Buat objek DateTime dengan tanggal dummy (karena hanya butuh selisih waktu)
       final startDate = DateTime(2000, 1, 1, startHour, startMinute);
       final endDate = DateTime(2000, 1, 1, endHour, endMinute);
-      
+
       final difference = endDate.difference(startDate);
       return difference.inHours > 0 ? difference.inHours : 1;
     } catch (e) {
       print("Error parsing durationInHours: $e");
-      return 1; // default 1 jam jika parse gagal
+      return 1;
     }
   }
 }

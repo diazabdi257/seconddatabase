@@ -1,4 +1,4 @@
-// ignore_for_file: deprecated_member_use // Hapus jika tidak ada warning dari package lain
+// ignore_for_file: deprecated_member_use
 
 import 'package:flutter/material.dart';
 import 'package:firebase_database/firebase_database.dart';
@@ -46,12 +46,16 @@ class _PemesananPageState extends State<PemesananPage> {
   Future<void> _fetchUserBookings() async {
     if (_currentUserEmail == null || _currentUserEmail!.isEmpty) {
       if (!mounted) return;
-      setState(() { _isLoading = false; });
+      setState(() {
+        _isLoading = false;
+      });
       return;
     }
 
     if (!mounted) return;
-    setState(() { _isLoading = true; });
+    setState(() {
+      _isLoading = true;
+    });
 
     List<BookingOrder> fetchedBookings = [];
     final DatabaseReference dbRef = FirebaseDatabase.instance.ref();
@@ -59,22 +63,50 @@ class _PemesananPageState extends State<PemesananPage> {
 
     try {
       for (String sportNode in sportNodes) {
-        DataSnapshot sportSnapshot = await dbRef.child(sportNode).once().then((event) => event.snapshot);
+        DataSnapshot sportSnapshot = await dbRef
+            .child(sportNode)
+            .once()
+            .then((event) => event.snapshot);
         if (sportSnapshot.value != null && sportSnapshot.value is Map) {
-          Map<dynamic, dynamic> fieldsData = sportSnapshot.value as Map<dynamic, dynamic>;
+          Map<dynamic, dynamic> fieldsData =
+              sportSnapshot.value as Map<dynamic, dynamic>;
           fieldsData.forEach((fieldId, datesData) {
             if (datesData is Map) {
               datesData.forEach((dateStr, bookingsMap) {
                 if (bookingsMap is Map) {
                   bookingsMap.forEach((bookingKey, bookingDetails) {
                     if (bookingDetails is Map) {
-                      final bookingMap = bookingDetails as Map<dynamic, dynamic>;
+                      final bookingMap =
+                          bookingDetails as Map<dynamic, dynamic>;
+
+                      // PERBAIKAN: Logika untuk memeriksa status pembayaran yang lebih baik
+                      // Ambil nilai dari kedua kemungkinan field ('status' atau 'payment_status')
+                      String statusValue =
+                          (bookingMap['status'] ??
+                                  bookingMap['payment_status'] ??
+                                  '')
+                              .toString()
+                              .toLowerCase();
+                      // Tentukan apakah status tersebut termasuk kondisi "Lunas"
+                      bool isPaid =
+                          statusValue == 'success' ||
+                          statusValue == 'confirmed' ||
+                          statusValue == 'capture';
+
+                      // Gunakan kondisi 'isPaid' yang baru
                       if (bookingMap['userName'] == _currentUserEmail &&
-                          (bookingMap['payment_status'] == 'success' || bookingMap['payment_status'] == 'confirmed')) {
-                        try { // Tambahkan try-catch untuk parsing individu
-                           fetchedBookings.add(BookingOrder.fromMap(bookingKey.toString(), bookingMap));
+                          isPaid) {
+                        try {
+                          fetchedBookings.add(
+                            BookingOrder.fromMap(
+                              bookingKey.toString(),
+                              bookingMap,
+                            ),
+                          );
                         } catch (e) {
-                           print("Error parsing booking data for key $bookingKey: $e");
+                          print(
+                            "Error parsing booking data for key $bookingKey: $e",
+                          );
                         }
                       }
                     }
@@ -88,10 +120,14 @@ class _PemesananPageState extends State<PemesananPage> {
       fetchedBookings.sort((a, b) => b.timestamp.compareTo(a.timestamp));
     } catch (error) {
       print("Error fetching bookings: $error");
-      if(mounted){
-          ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(content: Text("Gagal memuat riwayat pemesanan: ${error.toString()}"))
-          );
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              "Gagal memuat riwayat pemesanan: ${error.toString()}",
+            ),
+          ),
+        );
       }
     }
 
@@ -105,64 +141,60 @@ class _PemesananPageState extends State<PemesananPage> {
   Widget _bookingCardOpsi2({required BookingOrder booking}) {
     Color cardBackgroundColor;
     Color textColor;
-    Color buttonTextColor;
     String displayStatus = booking.paymentStatus.toUpperCase();
 
-    switch (booking.paymentStatus.toLowerCase()) {
-      case 'success':
-      case 'confirmed':
-        cardBackgroundColor = Colors.blue.shade50;
-        textColor = Colors.black;
-        buttonTextColor = Colors.white;
-        displayStatus = "BERHASIL";
-        break;
-      case 'pending':
-        cardBackgroundColor = Colors.orange.shade50;
-        textColor = Colors.orange.shade800;
-        buttonTextColor = Colors.orange.shade50;
-        displayStatus = "PENDING";
-        break;
-      case 'cancelled_by_user_popup_close':
-      case 'cancelled_on_back_press':
-      case 'cancelled_on_appbar_back':
-      case 'cancelled':
-        cardBackgroundColor = Colors.red.shade50;
-        textColor = Colors.red.shade800;
-        buttonTextColor = Colors.red.shade50;
-        displayStatus = "DIBATALKAN";
-        break;
-      case 'error':
-      case 'failed':
-      case 'webview_load_error':
-      case 'client_parsing_error':
-      case 'invalid_message_format':
-        cardBackgroundColor = Colors.red.shade50;
-        textColor = Colors.red.shade800;
-        buttonTextColor = Colors.red.shade50;
-        displayStatus = "GAGAL";
-        break;
-      default:
-        cardBackgroundColor = Colors.grey.shade100;
-        textColor = Colors.grey.shade800;
-        buttonTextColor = Colors.grey.shade100;
-        displayStatus = booking.paymentStatus.isNotEmpty ? booking.paymentStatus.toUpperCase() : "TIDAK DIKETAHUI";
+    // PERBAIKAN: Logika penentuan warna dan status agar lebih konsisten
+    String status = booking.paymentStatus.toLowerCase();
+    bool isSuccess =
+        status == 'success' || status == 'confirmed' || status == 'capture';
+
+    if (isSuccess) {
+      cardBackgroundColor = Colors.blue.shade50;
+      textColor = Colors.black;
+      displayStatus = "BERHASIL";
+    } else if (status == 'pending') {
+      cardBackgroundColor = Colors.orange.shade50;
+      textColor = Colors.orange.shade800;
+      displayStatus = "PENDING";
+    } else if (status.contains('cancel')) {
+      cardBackgroundColor = Colors.red.shade50;
+      textColor = Colors.red.shade800;
+      displayStatus = "DIBATALKAN";
+    } else if (status.contains('error') || status == 'failed') {
+      cardBackgroundColor = Colors.red.shade50;
+      textColor = Colors.red.shade800;
+      displayStatus = "GAGAL";
+    } else {
+      cardBackgroundColor = Colors.grey.shade100;
+      textColor = Colors.grey.shade800;
+      displayStatus =
+          booking.paymentStatus.isNotEmpty
+              ? booking.paymentStatus.toUpperCase()
+              : "TIDAK DIKETAHUI";
     }
 
     bool canReschedule = false;
-    DateTime bookingStartDateTime = DateTime.now();
     try {
-        String bookingDateTimeString = "${booking.bookingDate} ${booking.startTime}";
-        bookingStartDateTime = DateFormat('yyyy-MM-dd HH:mm').parse(bookingDateTimeString);
+      String bookingDateTimeString =
+          "${booking.bookingDate} ${booking.startTime}";
+      DateTime bookingStartDateTime = DateFormat(
+        'yyyy-MM-dd HH:mm',
+      ).parse(bookingDateTimeString);
 
-        if ((booking.paymentStatus.toLowerCase() == 'success' || booking.paymentStatus.toLowerCase() == 'confirmed') &&
-            booking.scheduleChangeCount > 0 &&
-            bookingStartDateTime.isAfter(DateTime.now()) &&
-            DateTime.now().isBefore(bookingStartDateTime.subtract(const Duration(hours: 3)))) {
-          canReschedule = true;
-        }
+      // PERBAIKAN: Gunakan variabel 'isSuccess' yang sudah dibuat
+      if (isSuccess &&
+          booking.scheduleChangeCount > 0 &&
+          bookingStartDateTime.isAfter(DateTime.now()) &&
+          DateTime.now().isBefore(
+            bookingStartDateTime.subtract(const Duration(hours: 3)),
+          )) {
+        canReschedule = true;
+      }
     } catch (e) {
-        print("Error parsing booking date/time for reschedule check (CardOpsi2): $e");
-        canReschedule = false;
+      print(
+        "Error parsing booking date/time for reschedule check (CardOpsi2): $e",
+      );
+      canReschedule = false;
     }
 
     return Card(
@@ -181,32 +213,64 @@ class _PemesananPageState extends State<PemesananPage> {
             Text(
               "${booking.sportType} - ${booking.fieldDisplayName}",
               style: TextStyle(
-                  fontSize: 17.0,
-                  fontWeight: FontWeight.bold,
-                  color: textColor),
+                fontSize: 17.0,
+                fontWeight: FontWeight.bold,
+                color: textColor,
+              ),
             ),
             const SizedBox(height: 6),
-            Text("Status: $displayStatus", style: TextStyle(fontSize: 13, color: textColor, fontWeight: FontWeight.w600)),
+            Text(
+              "Status: $displayStatus",
+              style: TextStyle(
+                fontSize: 13,
+                color: textColor,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
             const Divider(height: 16, thickness: 0.5),
-            Text("Tanggal: ${booking.formattedDisplayDate}", style: TextStyle(fontSize: 14, color: textColor.withOpacity(0.9))),
-            Text("Jam: ${booking.timeRangeDisplay}", style: TextStyle(fontSize: 14, color: textColor.withOpacity(0.9))),
-            Text("Harga: Rp ${NumberFormat('#,###', 'id_ID').format(booking.grossAmount)}", style: TextStyle(fontSize: 14, color: textColor.withOpacity(0.9), fontWeight: FontWeight.w500)),
+            Text(
+              "Tanggal: ${booking.formattedDisplayDate}",
+              style: TextStyle(fontSize: 14, color: textColor.withOpacity(0.9)),
+            ),
+            Text(
+              "Jam: ${booking.timeRangeDisplay}",
+              style: TextStyle(fontSize: 14, color: textColor.withOpacity(0.9)),
+            ),
+            Text(
+              "Harga: Rp ${NumberFormat('#,###', 'id_ID').format(booking.grossAmount)}",
+              style: TextStyle(
+                fontSize: 14,
+                color: textColor.withOpacity(0.9),
+                fontWeight: FontWeight.w500,
+              ),
+            ),
             const SizedBox(height: 4),
-            Text("Kesempatan Ganti Jadwal: ${booking.scheduleChangeCount}x", style: TextStyle(fontSize: 14, color: textColor.withOpacity(0.9))),
+            Text(
+              "Kesempatan Ganti Jadwal: ${booking.scheduleChangeCount}x",
+              style: TextStyle(fontSize: 14, color: textColor.withOpacity(0.9)),
+            ),
             if (canReschedule)
               Padding(
                 padding: const EdgeInsets.only(top: 10.0),
                 child: SizedBox(
                   width: double.infinity,
                   child: ElevatedButton.icon(
-                    icon: Icon(Icons.edit_calendar_outlined, size: 18, color: buttonTextColor),
-                    label: Text("Ganti Jadwal", style: TextStyle(color: buttonTextColor)),
+                    icon: Icon(
+                      Icons.edit_calendar_outlined,
+                      size: 18,
+                      color: Colors.white,
+                    ),
+                    label: Text(
+                      "Ganti Jadwal",
+                      style: TextStyle(color: Colors.white),
+                    ),
                     onPressed: () {
-                       Navigator.push(
+                      Navigator.push(
                         context,
                         MaterialPageRoute(
-                          builder: (context) =>
-                              GantiJadwalPage(initialBooking: booking),
+                          builder:
+                              (context) =>
+                                  GantiJadwalPage(initialBooking: booking),
                         ),
                       ).then((value) {
                         if (value == true && mounted) {
@@ -215,7 +279,7 @@ class _PemesananPageState extends State<PemesananPage> {
                       });
                     },
                     style: ElevatedButton.styleFrom(
-                      backgroundColor: textColor.withOpacity(0.8),
+                      backgroundColor: Colors.blue.shade400,
                       shape: RoundedRectangleBorder(
                         borderRadius: BorderRadius.circular(8),
                       ),
@@ -233,32 +297,44 @@ class _PemesananPageState extends State<PemesananPage> {
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: Colors.grey[100],
-      body: _isLoading
-          ? const Center(child: CircularProgressIndicator())
-          : _userBookings.isEmpty
+      body:
+          _isLoading
+              ? const Center(child: CircularProgressIndicator())
+              : _userBookings.isEmpty
               ? Center(
-                  child: Padding(
-                    padding: const EdgeInsets.all(20.0),
-                    child: Text(
-                      _currentUserEmail == null
-                          ? "Tidak dapat memuat data pengguna. Mohon coba lagi."
-                          : "Anda belum memiliki riwayat pemesanan yang berhasil.",
-                      style: TextStyle(fontSize: 17, color: Colors.grey[700]),
-                      textAlign: TextAlign.center,
-                    ),
-                  ),
-                )
-              : RefreshIndicator(
-                  onRefresh: _fetchUserBookings,
-                  child: ListView.builder(
-                    padding: const EdgeInsets.fromLTRB(16, 16, 16, 80),
-                    itemCount: _userBookings.length,
-                    itemBuilder: (context, index) {
-                      final booking = _userBookings[index];
-                      return _bookingCardOpsi2(booking: booking); // Menggunakan Opsi 2
-                    },
+                child: Padding(
+                  padding: const EdgeInsets.all(20.0),
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Icon(
+                        Icons.history_toggle_off,
+                        color: Colors.grey[400],
+                        size: 80,
+                      ),
+                      const SizedBox(height: 16),
+                      Text(
+                        _currentUserEmail == null
+                            ? "Gagal memuat data pengguna."
+                            : "Anda belum memiliki riwayat pemesanan.",
+                        style: TextStyle(fontSize: 17, color: Colors.grey[700]),
+                        textAlign: TextAlign.center,
+                      ),
+                    ],
                   ),
                 ),
+              )
+              : RefreshIndicator(
+                onRefresh: _fetchUserBookings,
+                child: ListView.builder(
+                  padding: const EdgeInsets.fromLTRB(16, 16, 16, 80),
+                  itemCount: _userBookings.length,
+                  itemBuilder: (context, index) {
+                    final booking = _userBookings[index];
+                    return _bookingCardOpsi2(booking: booking);
+                  },
+                ),
+              ),
     );
   }
 }
