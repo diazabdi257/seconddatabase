@@ -121,13 +121,6 @@ class _MembershipPageState extends State<MembershipPage> {
       });
     } catch (e) {
       print("Error fetching active membership: $e");
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text("Gagal memuat data membership: ${e.toString()}"),
-          ),
-        );
-      }
     }
   }
 
@@ -143,10 +136,6 @@ class _MembershipPageState extends State<MembershipPage> {
       _isLoadingScheduleForSelectedDay = true;
       _unavailableMemberStartHours.clear();
     });
-
-    print(
-      "Fetching unavailable slots for Field: $_selectedFieldId, Day: $_selectedDayOfWeek",
-    );
 
     try {
       Set<int> tempUnavailableHours = {};
@@ -169,18 +158,32 @@ class _MembershipPageState extends State<MembershipPage> {
               key,
               value as Map<dynamic, dynamic>,
             );
-            if (schedule.isActive && schedule.dayOfWeek == _selectedDayOfWeek) {
-              int otherStart = int.parse(schedule.startTime.split(':')[0]);
-              int otherEnd = int.parse(schedule.endTime.split(':')[0]);
-              for (
-                int newStartHour = _memberOpeningHour;
-                newStartHour <= _memberLatestStartHour;
-                newStartHour++
-              ) {
-                int newEndHour = newStartHour + _bookingDurationHours;
-                if (newStartHour < otherEnd && newEndHour > otherStart) {
-                  tempUnavailableHours.add(newStartHour);
+            
+            int dayOfWeekFromDB = schedule.dayOfWeek;
+            if (dayOfWeekFromDB == 0) {
+              dayOfWeekFromDB = 7; // Konversi Minggu (0) ke standar Dart (7)
+            }
+
+            if (schedule.isActive &&
+                dayOfWeekFromDB == _selectedDayOfWeek &&
+                (schedule.userId != _currentUser?.uid ||
+                    _activeMemberSchedule == null)) {
+              try {
+                int otherStart = int.parse(schedule.startTime.split(':')[0]);
+                int otherEnd = int.parse(schedule.endTime.split(':')[0]);
+
+                for (
+                  int newStartHour = _memberOpeningHour;
+                  newStartHour <= _memberLatestStartHour;
+                  newStartHour++
+                ) {
+                  int newEndHour = newStartHour + _bookingDurationHours;
+                  if (newStartHour < otherEnd && newEndHour > otherStart) {
+                    tempUnavailableHours.add(newStartHour);
+                  }
                 }
+              } catch (e) {
+                print("Error parsing time for member schedule check: $e");
               }
             }
           }
@@ -190,20 +193,19 @@ class _MembershipPageState extends State<MembershipPage> {
       // 2. Periksa konflik dengan booking reguler untuk 4 minggu ke depan
       List<Future> bookingChecks = [];
       DateTime checkDate = DateTime.now();
-      // Cari tanggal pertama di masa depan yang harinya cocok
+      
       while (checkDate.weekday != _selectedDayOfWeek) {
         checkDate = checkDate.add(const Duration(days: 1));
       }
 
-      for (int i = 0; i < 4; i++) {
-        // Cek untuk 4 minggu ke depan
+      for (int i = 0; i < 4; i++) { // Cek untuk 4 minggu
         DateTime futureDate = checkDate.add(Duration(days: 7 * i));
         String formattedDate = DateFormat('yyyy-MM-dd').format(futureDate);
         DatabaseReference bookingPathRef = _dbRef
             .child('bookings_badminton')
             .child(_selectedFieldId!)
             .child(formattedDate);
-
+        
         bookingChecks.add(
           bookingPathRef.once().then((event) {
             final snapshot = event.snapshot;
@@ -243,25 +245,15 @@ class _MembershipPageState extends State<MembershipPage> {
         );
       }
 
-      await Future.wait(bookingChecks); // Tunggu semua pengecekan selesai
+      await Future.wait(bookingChecks);
 
       if (mounted) {
         setState(() {
           _unavailableMemberStartHours = tempUnavailableHours;
-          print("Total unavailable start hours: $_unavailableMemberStartHours");
         });
       }
     } catch (e) {
       print("Error fetching unavailable slots: $e");
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(
-              "Gagal memeriksa ketersediaan jadwal: ${e.toString()}",
-            ),
-          ),
-        );
-      }
     } finally {
       if (mounted) {
         setState(() {
@@ -273,13 +265,7 @@ class _MembershipPageState extends State<MembershipPage> {
 
   String _dayOfWeekToString(int day) {
     const days = [
-      "Senin",
-      "Selasa",
-      "Rabu",
-      "Kamis",
-      "Jumat",
-      "Sabtu",
-      "Minggu",
+      "Senin", "Selasa", "Rabu", "Kamis", "Jumat", "Sabtu", "Minggu",
     ];
     if (day >= 1 && day <= 7) return days[day - 1];
     return "Tidak Valid";
@@ -313,7 +299,7 @@ class _MembershipPageState extends State<MembershipPage> {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text(
-            'Jadwal dan jam yang dipilih sudah diambil oleh member lain atau bentrok dengan booking reguler.',
+            'Jadwal yang dipilih bentrok dengan jadwal lain (member atau booking biasa).',
           ),
           backgroundColor: Colors.orange,
         ),
@@ -328,35 +314,30 @@ class _MembershipPageState extends State<MembershipPage> {
 
     final String firebaseKey =
         _dbRef.child('memberSchedules_badminton').push().key!;
-    final String firstDateStr = DateFormat('yyyy-MM-dd').format(DateTime.now());
-    final String startTimeStr =
-        "${_selectedStartHour!.toString().padLeft(2, '0')}:00";
-    final String endTimeStr =
-        "${(_selectedStartHour! + _bookingDurationHours).toString().padLeft(2, '0')}:00";
-
+    
     final Map<String, dynamic> dataToSave = {
       'bookingType': 'member',
       'dayOfWeek': _selectedDayOfWeek,
-      'endTime': endTimeStr,
+      'endTime': "${(_selectedStartHour! + _bookingDurationHours).toString().padLeft(2, '0')}:00",
       'fieldId': _selectedFieldId,
-      'firstDate': firstDateStr,
+      'firstDate': DateFormat('yyyy-MM-dd').format(DateTime.now()),
       'fullName': _fullName,
       'phoneNumber': _phoneNumber,
-      'startTime': startTimeStr,
+      'startTime': "${_selectedStartHour!.toString().padLeft(2, '0')}:00",
       'timestamp': ServerValue.timestamp,
       'validityMonths': _selectedDurationMonths,
       'userId': _currentUser!.uid,
       'email': _email,
       'payment_status': 'pending',
     };
-
+    
     final String shortFieldId = _selectedFieldId!.replaceFirst('lapangan', 'L');
     final String dateForOrderId = DateFormat('yyMMdd').format(DateTime.now());
     final String orderIdSuffix = firebaseKey.substring(firebaseKey.length - 8);
     final String orderId = 'MBR-B$shortFieldId-$dateForOrderId-$orderIdSuffix';
-
+    
     dataToSave['midtrans_order_id'] = orderId;
-
+    
     final int grossAmount = 300000 * _selectedDurationMonths;
     final String firebaseMembershipPath =
         'memberSchedules_badminton/$firebaseKey';
@@ -364,19 +345,14 @@ class _MembershipPageState extends State<MembershipPage> {
     try {
       final response = await http
           .post(
-            Uri.parse(
-              'https://diazmidtransbackendtest.netlify.app/api/create-midtrans-transaction',
-            ),
-            headers: <String, String>{
-              'Content-Type': 'application/json; charset=UTF-8',
-            },
+            Uri.parse('https://diazmidtransbackendtest.netlify.app/api/create-midtrans-transaction'),
+            headers: <String, String>{'Content-Type': 'application/json; charset=UTF-8'},
             body: jsonEncode(<String, dynamic>{
               'order_id': orderId,
               'gross_amount': grossAmount,
               'user_email': _email,
               'item_id': 'MBR-B$shortFieldId-$_selectedDurationMonths',
-              'item_name':
-                  'Membership Badminton $_selectedDurationMonths Bln - Lap ${shortFieldId.substring(1)}',
+              'item_name': 'Membership Badminton $_selectedDurationMonths Bln - Lap ${shortFieldId.substring(1)}',
               'quantityitem': 1,
               'priceperitem': grossAmount,
             }),
@@ -398,45 +374,27 @@ class _MembershipPageState extends State<MembershipPage> {
           Navigator.push(
             context,
             MaterialPageRoute(
-              builder:
-                  (context) => WebViewPage(
-                    snapToken: snapToken,
-                    firebaseBookingPath: firebaseMembershipPath,
-                  ),
+              builder: (context) => WebViewPage(
+                snapToken: snapToken,
+                firebaseBookingPath: firebaseMembershipPath,
+              ),
             ),
           ).then((_) {
             if (mounted) _loadUserDataAndMembership();
           });
         } else {
           ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('Gagal mendapatkan token pembayaran.'),
-              backgroundColor: Colors.red,
-            ),
+            const SnackBar(content: Text('Gagal mendapatkan token pembayaran.'), backgroundColor: Colors.red),
           );
         }
       } else {
         final errorData = jsonDecode(response.body);
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(
-              'Error dari server: ${errorData['error'] ?? 'Gagal'}',
-            ),
-            backgroundColor: Colors.red,
-          ),
+          SnackBar(content: Text('Error dari server: ${errorData['error'] ?? 'Gagal'}'), backgroundColor: Colors.red),
         );
-        print("Backend Error: ${response.body}");
       }
     } catch (e) {
       print("Error initiating membership payment: $e");
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Terjadi kesalahan: ${e.toString()}'),
-            backgroundColor: Colors.red,
-          ),
-        );
-      }
     } finally {
       if (mounted) {
         setState(() {
@@ -482,9 +440,14 @@ class _MembershipPageState extends State<MembershipPage> {
     String validityInfo = "Anda belum terdaftar sebagai member.";
 
     if (isActive && _activeMemberSchedule != null) {
+      // PERBAIKAN: Konversi hari minggu untuk ditampilkan di UI
+      int dayOfWeekFromDB = _activeMemberSchedule!.dayOfWeek;
+      if(dayOfWeekFromDB == 0){
+        dayOfWeekFromDB = 7;
+      }
       validityInfo =
           "Berlaku hingga: ${DateFormat('dd MMMM yyyy', 'id_ID').format(_activeMemberSchedule!.endDate)}\n"
-          "Jadwal Tetap: ${_dayOfWeekToString(_activeMemberSchedule!.dayOfWeek)}, ${_activeMemberSchedule!.startTime} - ${_activeMemberSchedule!.endTime}\n"
+          "Jadwal Tetap: ${_dayOfWeekToString(dayOfWeekFromDB)}, ${_activeMemberSchedule!.startTime} - ${_activeMemberSchedule!.endTime}\n"
           "Lapangan: ${_activeMemberSchedule!.fieldId.replaceFirst('lapangan', 'Lap. ')}";
     }
 
@@ -733,12 +696,12 @@ class _MembershipPageState extends State<MembershipPage> {
                   (index) {
                     final hour = _memberOpeningHour + index;
                     final bool isSelected = _selectedStartHour == hour;
-                    final bool isTakenByOtherMember =
+                    final bool isTaken =
                         _unavailableMemberStartHours.contains(hour);
 
                     return ElevatedButton(
                       onPressed:
-                          isTakenByOtherMember
+                          isTaken
                               ? null
                               : () {
                                 if (mounted)
@@ -750,13 +713,13 @@ class _MembershipPageState extends State<MembershipPage> {
                         backgroundColor:
                             isSelected
                                 ? Colors.lightBlue.shade300
-                                : isTakenByOtherMember
+                                : isTaken
                                 ? Colors.red.shade100
                                 : Colors.blueGrey[50],
                         foregroundColor:
                             isSelected
                                 ? Colors.white
-                                : isTakenByOtherMember
+                                : isTaken
                                 ? Colors.red.shade400
                                 : Colors.blueGrey[800],
                         shape: RoundedRectangleBorder(
@@ -811,7 +774,7 @@ class _MembershipPageState extends State<MembershipPage> {
             style: ElevatedButton.styleFrom(
               backgroundColor: Theme.of(context).primaryColor,
               shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(12),
+                borderRadius: BorderRadius.circular(12)
               ),
               textStyle: const TextStyle(
                 fontSize: 16,

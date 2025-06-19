@@ -16,7 +16,7 @@ class Lapangan1BadmintonPage extends StatefulWidget {
 }
 
 class _Lapangan1BadmintonPageState extends State<Lapangan1BadmintonPage> {
-  // --- Parameter Spesifik Lapangan (UBAH INI UNTUK LAPANGAN LAIN) ---
+  // --- Parameter Spesifik Lapangan ---
   final String fieldId = 'lapangan1';
   final int pricePerHour = 60000;
   final String sportNodeName = 'bookings_badminton';
@@ -25,6 +25,7 @@ class _Lapangan1BadmintonPageState extends State<Lapangan1BadmintonPage> {
   final String assetImagePath = 'assets/lapangan1badminton.jpg';
   final String pageTitle = "Lapangan 1 - Badminton";
 
+  // --- State & Variabel Lainnya ---
   final int openingHour = 7;
   final int closingHour = 22;
   bool _isLoading = false;
@@ -72,7 +73,6 @@ class _Lapangan1BadmintonPageState extends State<Lapangan1BadmintonPage> {
 
     String formattedDate = DateFormat('yyyy-MM-dd').format(selectedDate);
     String firebaseBookingPath = '$sportNodeName/$fieldId/$formattedDate';
-    // PERBAIKAN: Definisikan path untuk jadwal member
     String firebaseMemberPath = 'memberSchedules_badminton';
 
     print('Fetching regular bookings from path: $firebaseBookingPath');
@@ -82,7 +82,7 @@ class _Lapangan1BadmintonPageState extends State<Lapangan1BadmintonPage> {
       Set<int> tempBookedHours = {};
       Set<int> tempMemberHours = {};
 
-      // 1. Fetch booking biasa (logika ini tetap sama)
+      // 1. Fetch booking biasa
       final eventBooking = await _databaseRef
           .child(firebaseBookingPath)
           .once()
@@ -107,29 +107,13 @@ class _Lapangan1BadmintonPageState extends State<Lapangan1BadmintonPage> {
 
               if (startTimeStr.isNotEmpty && endTimeStr.isNotEmpty) {
                 try {
-                  DateTime bookingStartTime = DateTime(
-                    selectedDate.year,
-                    selectedDate.month,
-                    selectedDate.day,
-                    int.parse(startTimeStr.split(':')[0]),
-                  );
-                  DateTime bookingEndTime = DateTime(
-                    selectedDate.year,
-                    selectedDate.month,
-                    selectedDate.day,
-                    int.parse(endTimeStr.split(':')[0]),
-                  );
-                  for (
-                    int hour = bookingStartTime.hour;
-                    hour < bookingEndTime.hour;
-                    hour++
-                  ) {
+                  DateTime bookingStartTime = DateTime(selectedDate.year, selectedDate.month, selectedDate.day, int.parse(startTimeStr.split(':')[0]));
+                  DateTime bookingEndTime = DateTime(selectedDate.year, selectedDate.month, selectedDate.day, int.parse(endTimeStr.split(':')[0]));
+                  for (int hour = bookingStartTime.hour; hour < bookingEndTime.hour; hour++) {
                     tempBookedHours.add(hour);
                   }
                 } catch (e) {
-                  print(
-                    "Could not parse time for booking $uniqueBookingKey. Error: $e",
-                  );
+                  print("Could not parse time for booking $uniqueBookingKey. Error: $e");
                 }
               }
             }
@@ -137,104 +121,74 @@ class _Lapangan1BadmintonPageState extends State<Lapangan1BadmintonPage> {
         });
       }
 
-      // --- MULAI BLOK FETCH JADWAL MEMBER ---
       // 2. Fetch jadwal member
-      Query memberQuery = _databaseRef
-          .child(firebaseMemberPath)
-          .orderByChild('fieldId')
-          .equalTo(fieldId);
-      final eventMember = await memberQuery.once().timeout(
-        const Duration(seconds: 15),
-      );
+      Query memberQuery = _databaseRef.child(firebaseMemberPath).orderByChild('fieldId').equalTo(fieldId);
+      final eventMember = await memberQuery.once().timeout(const Duration(seconds: 15));
       final snapshotMember = eventMember.snapshot;
 
       if (snapshotMember.value != null && snapshotMember.value is Map) {
-        Map<dynamic, dynamic> memberSchedules =
-            snapshotMember.value as Map<dynamic, dynamic>;
-        memberSchedules.forEach((key, value) {
-          if (value is Map) {
-            final scheduleMap = value as Map<dynamic, dynamic>;
+          Map<dynamic, dynamic> memberSchedules = snapshotMember.value as Map<dynamic, dynamic>;
+          memberSchedules.forEach((key, value) {
+              if (value is Map) {
+                  final scheduleMap = value as Map<dynamic, dynamic>;
+                  
+                  // --- PERBAIKAN LOGIKA STATUS MEMBER ---
+                  String bookingType = (scheduleMap['bookingType'] ?? '').toString().toLowerCase();
+                  String status = (scheduleMap['status'] ?? scheduleMap['payment_status'] ?? '').toString().toLowerCase();
+                  bool isPaid = status == 'success' || status == 'confirmed';
+                  bool isActiveMemberSchedule = (bookingType == 'admin' || isPaid);
+                  // --- AKHIR PERBAIKAN ---
 
-            // Cek apakah jadwal member ini aktif.
-            // Asumsi: jika bookingType 'admin' atau payment_status 'success'/'confirmed', maka aktif.
-            String bookingType =
-                (scheduleMap['bookingType'] ?? '').toString().toLowerCase();
-            String paymentStatus =
-                (scheduleMap['payment_status'] ?? '').toString().toLowerCase();
-            bool isActiveMemberSchedule =
-                (bookingType == 'admin' ||
-                    paymentStatus == 'success' ||
-                    paymentStatus == 'confirmed');
+                  if (isActiveMemberSchedule) {
+                      int scheduleDayOfWeek = (scheduleMap['dayOfWeek'] as num?)?.toInt() ?? 0;
 
-            if (isActiveMemberSchedule) {
-              int scheduleDayOfWeek =
-                  (scheduleMap['dayOfWeek'] as num?)?.toInt() ?? 0;
-              // Cek apakah hari pada jadwal member sama dengan hari pada tanggal yang dipilih
-              if (scheduleDayOfWeek == selectedDate.weekday) {
-                String firstDateStr = scheduleMap['firstDate'] ?? '';
-                int validityMonths =
-                    (scheduleMap['validityMonths'] as num?)?.toInt() ?? 0;
-
-                if (firstDateStr.isNotEmpty && validityMonths > 0) {
-                  try {
-                    DateTime firstDate = DateFormat(
-                      'yyyy-MM-dd',
-                    ).parse(firstDateStr);
-                    // Tambahkan bulan validitas untuk mendapatkan tanggal akhir
-                    DateTime memberScheduleEndDate = DateTime(
-                      firstDate.year,
-                      firstDate.month + validityMonths,
-                      firstDate.day,
-                    );
-
-                    // Cek apakah tanggal yang dipilih berada dalam masa berlaku membership
-                    if (!selectedDate.isBefore(firstDate) &&
-                        selectedDate.isBefore(memberScheduleEndDate)) {
-                      String scheduleStartTimeStr =
-                          scheduleMap['startTime'] ?? '';
-                      String scheduleEndTimeStr = scheduleMap['endTime'] ?? '';
-
-                      if (scheduleStartTimeStr.isNotEmpty &&
-                          scheduleEndTimeStr.isNotEmpty) {
-                        int startHour = int.parse(
-                          scheduleStartTimeStr.split(':')[0],
-                        );
-                        int endHour = int.parse(
-                          scheduleEndTimeStr.split(':')[0],
-                        );
-
-                        // Tambahkan semua jam dalam rentang jadwal member ke set
-                        for (int hour = startHour; hour < endHour; hour++) {
-                          tempMemberHours.add(hour);
-                        }
+                      int dayOfWeekFromDB = scheduleDayOfWeek;
+                      if (dayOfWeekFromDB == 0) {
+                          dayOfWeekFromDB = 7;
                       }
-                    }
-                  } catch (e) {
-                    print(
-                      "Error parsing member schedule date for key $key: $e",
-                    );
+                      
+                      if (dayOfWeekFromDB == selectedDate.weekday) {
+                          String firstDateStr = scheduleMap['firstDate'] ?? '';
+                          int validityMonths = (scheduleMap['validityMonths'] as num?)?.toInt() ?? 0;
+
+                          if (firstDateStr.isNotEmpty && validityMonths > 0) {
+                              try {
+                                  DateTime firstDate = DateFormat('yyyy-MM-dd').parse(firstDateStr);
+                                  DateTime memberScheduleEndDate = DateTime(firstDate.year, firstDate.month + validityMonths, firstDate.day);
+
+                                  if (!selectedDate.isBefore(firstDate) && selectedDate.isBefore(memberScheduleEndDate)) {
+                                      String scheduleStartTimeStr = scheduleMap['startTime'] ?? '';
+                                      String scheduleEndTimeStr = scheduleMap['endTime'] ?? '';
+
+                                      if (scheduleStartTimeStr.isNotEmpty && scheduleEndTimeStr.isNotEmpty) {
+                                          int startHour = int.parse(scheduleStartTimeStr.split(':')[0]);
+                                          int endHour = int.parse(scheduleEndTimeStr.split(':')[0]);
+
+                                          for (int hour = startHour; hour < endHour; hour++) {
+                                              tempMemberHours.add(hour);
+                                          }
+                                      }
+                                  }
+                              } catch (e) {
+                                  print("Error parsing member schedule date for key $key: $e");
+                              }
+                          }
+                      }
                   }
-                }
               }
-            }
-          }
-        });
+          });
       }
-      // --- AKHIR BLOK FETCH JADWAL MEMBER ---
 
       if (mounted) {
         setState(() {
           _bookedHoursForSelectedDate = tempBookedHours;
-          _memberReservedHours =
-              tempMemberHours; // Terapkan jam member yang sudah di-fetch
+          _memberReservedHours = tempMemberHours;
         });
       }
     } catch (e) {
       print('Error fetching slots: $e');
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Gagal memuat jadwal: ${e.toString()}')),
-        );
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Gagal memuat jadwal: ${e.toString()}')));
       }
     } finally {
       if (mounted) {
@@ -245,22 +199,14 @@ class _Lapangan1BadmintonPageState extends State<Lapangan1BadmintonPage> {
     }
   }
 
-  // --- Sisa kode (seperti _initiatePayment, build, dll.) tetap sama dan tidak perlu diubah ---
-
   Future<void> _saveBookingToFirebase({
     required DatabaseReference bookingRef,
     required Map<String, dynamic> bookingData,
   }) async {
     try {
       await bookingRef.set(bookingData).timeout(const Duration(seconds: 10));
-      print(
-        'Booking data saved to Firebase successfully! Path: ${bookingRef.path}',
-      );
     } catch (e) {
       print('Failed to save booking data to Firebase: $e');
-      if (mounted) {
-        /* ... SnackBar error ... */
-      }
     }
   }
 
@@ -269,7 +215,6 @@ class _Lapangan1BadmintonPageState extends State<Lapangan1BadmintonPage> {
         startTime == null ||
         endTime == null ||
         email.isEmpty) {
-      // ... Validasi ...
       return;
     }
 
@@ -296,7 +241,7 @@ class _Lapangan1BadmintonPageState extends State<Lapangan1BadmintonPage> {
     Map<String, dynamic> bookingDataForFirebase = {
       'bookingDate': formattedDateForPath,
       'endTime': DateFormat('HH:mm').format(endTime!),
-      'fieldId': fieldId, // Diubah menjadi String agar konsisten
+      'fieldId': fieldId,
       'fullName': fullName,
       'gross_amount': totalPrice,
       'key': firebaseKey,
@@ -700,7 +645,7 @@ class _Lapangan1BadmintonPageState extends State<Lapangan1BadmintonPage> {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        "Tanggal: ${DateFormat('EEEE, dd MMMM yy', 'id_ID').format(dateBooking!)}",
+                        "Tanggal: ${DateFormat('EEEE, dd MMMM yyyy', 'id_ID').format(dateBooking!)}",
                         style: const TextStyle(
                           fontSize: 16,
                           fontWeight: FontWeight.normal,
