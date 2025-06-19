@@ -27,6 +27,7 @@ dependencies:
   webview_flutter_android: ^4.7.0
   webview_flutter_wkwebview: ^3.22.0
   firebase_database: ^11.3.6
+  google_sign_in: ^6.3.0
 
 dev_dependencies:
   flutter_test:
