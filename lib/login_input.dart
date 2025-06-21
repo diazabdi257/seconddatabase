@@ -1,7 +1,7 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
-import 'package:shared_preferences/shared_preferences.dart'; // Import shared_preferences
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:seconddatabase/main_screen.dart'; // Halaman utama setelah login
 import 'package:seconddatabase/daftar_akun.dart'; // Halaman pendaftaran akun
 import 'lupa_password.dart';
@@ -18,6 +18,7 @@ class _LoginInputState extends State<LoginInput> {
   final _emailController = TextEditingController();
   final _passwordController = TextEditingController();
   bool _isPasswordVisible = false; // State untuk visibilitas password
+  bool _isLoggingIn = false; // State untuk loading indicator
 
   @override
   void initState() {
@@ -60,12 +61,16 @@ class _LoginInputState extends State<LoginInput> {
       return;
     }
 
+    setState(() {
+      _isLoggingIn = true; // Tampilkan loading
+    });
+
     try {
       final UserCredential userCredential = await FirebaseAuth.instance
           .signInWithEmailAndPassword(
-            email: _emailController.text.trim(), // Tambahkan trim
-            password: _passwordController.text.trim(),
-          ); // Tambahkan trim
+        email: _emailController.text.trim(),
+        password: _passwordController.text.trim(),
+      );
 
       User? user = userCredential.user;
 
@@ -77,7 +82,6 @@ class _LoginInputState extends State<LoginInput> {
                 .get();
 
         if (userData.exists && mounted) {
-          // Cek mounted sebelum setState/Navigator
           String fullName = userData.get('fullName') ?? 'Nama Tidak Tersedia';
           String email = userData.get('email') ?? 'Email Tidak Tersedia';
           String phoneNumber =
@@ -88,13 +92,13 @@ class _LoginInputState extends State<LoginInput> {
           await prefs.setString('email', email);
           await prefs.setString('phoneNumber', phoneNumber);
 
-          await _saveCredentials(); // Panggil setelah semua data SharedPreferences user utama disimpan
+          await _saveCredentials();
 
           if (mounted) {
-            // Cek mounted lagi sebelum navigasi
-            Navigator.pushReplacement(
+            Navigator.pushAndRemoveUntil(
               context,
               MaterialPageRoute(builder: (context) => const MainScreen()),
+              (Route<dynamic> route) => false,
             );
           }
         } else if (!userData.exists && mounted) {
@@ -107,31 +111,41 @@ class _LoginInputState extends State<LoginInput> {
       }
     } on FirebaseAuthException catch (e) {
       String errorMessage = "Login Gagal: Terjadi kesalahan.";
-      if (e.code == 'user-not-found') {
-        errorMessage = 'Email tidak terdaftar.';
-      } else if (e.code == 'wrong-password') {
-        errorMessage = 'Kata sandi salah.';
+      
+      // --- PERBAIKAN UTAMA DI SINI ---
+      // Menangani kode error baru dari Firebase untuk kredensial yang salah
+      if (e.code == 'invalid-credential') {
+        errorMessage = 'Email atau kata sandi yang Anda masukkan salah.';
       } else if (e.code == 'invalid-email') {
         errorMessage = 'Format email tidak valid.';
       } else if (e.code == 'network-request-failed') {
         errorMessage =
             'Gagal terhubung ke jaringan. Periksa koneksi internet Anda.';
       } else {
-        errorMessage = 'Login Gagal: ${e.message}';
+        // Fallback untuk error lain yang mungkin terjadi
+        errorMessage = 'Login Gagal: Silakan coba lagi nanti.';
+        print("Firebase Auth Error: ${e.code} - ${e.message}");
       }
+      // --- AKHIR PERBAIKAN ---
+
       if (mounted) {
         ScaffoldMessenger.of(
           context,
         ).showSnackBar(SnackBar(content: Text(errorMessage)));
       }
-      print("FirebaseAuthException: ${e.code} - ${e.message}");
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(
           context,
-        ).showSnackBar(SnackBar(content: Text("Login Gagal: ${e.toString()}")));
+        ).showSnackBar(SnackBar(content: Text("Login Gagal: Terjadi error tidak diketahui.")));
       }
       print("Login Error: $e");
+    } finally {
+      if(mounted){
+        setState(() {
+          _isLoggingIn = false; // Sembunyikan loading
+        });
+      }
     }
   }
 
@@ -151,7 +165,7 @@ class _LoginInputState extends State<LoginInput> {
           padding: const EdgeInsets.symmetric(
             horizontal: 20,
             vertical: 10,
-          ), // Ganti padding horizontal
+          ),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
@@ -162,7 +176,6 @@ class _LoginInputState extends State<LoginInput> {
               const SizedBox(height: 35),
               Center(
                 child: SizedBox(
-                  // Menggunakan SizedBox agar lebih konsisten
                   height: 150,
                   width: 150,
                   child: Image.asset(
@@ -190,12 +203,9 @@ class _LoginInputState extends State<LoginInput> {
               ),
               const SizedBox(height: 30),
               Form(
-                // Sebaiknya tambahkan GlobalKey<FormState> jika ada validasi form
                 child: Column(
                   children: [
-                    // Email
                     TextFormField(
-                      // Ganti Container(child: TextFormField(...)) menjadi TextFormField langsung
                       controller: _emailController,
                       keyboardType: TextInputType.emailAddress,
                       decoration: InputDecoration(
@@ -208,7 +218,6 @@ class _LoginInputState extends State<LoginInput> {
                           borderSide: const BorderSide(color: Colors.grey),
                         ),
                         enabledBorder: OutlineInputBorder(
-                          // Tambahkan border yang lebih jelas
                           borderRadius: BorderRadius.circular(12.0),
                           borderSide: BorderSide(
                             color: Colors.grey.shade400,
@@ -225,11 +234,9 @@ class _LoginInputState extends State<LoginInput> {
                       ),
                     ),
                     const SizedBox(height: 20),
-                    // Password
                     TextFormField(
-                      // Ganti Container(child: TextFormField(...)) menjadi TextFormField langsung
                       controller: _passwordController,
-                      obscureText: !_isPasswordVisible, // Kontrol visibilitas
+                      obscureText: !_isPasswordVisible,
                       decoration: InputDecoration(
                         filled: true,
                         fillColor: Colors.white,
@@ -254,7 +261,6 @@ class _LoginInputState extends State<LoginInput> {
                           ),
                         ),
                         suffixIcon: IconButton(
-                          // Tambahkan IconButton untuk toggle
                           icon: Icon(
                             _isPasswordVisible
                                 ? Icons.visibility
@@ -282,7 +288,7 @@ class _LoginInputState extends State<LoginInput> {
                             }
                           },
                           checkColor: Colors.white,
-                          activeColor: Colors.blue, // Lebih kontras
+                          activeColor: Colors.blue,
                         ),
                         const Text(
                           "Ingat Saya",
@@ -310,10 +316,10 @@ class _LoginInputState extends State<LoginInput> {
                     ),
                     const SizedBox(height: 20),
                     SizedBox(
-                      width: double.infinity, // Agar tombol full width
-                      height: 50, // Tinggi tombol yang konsisten
+                      width: double.infinity,
+                      height: 50,
                       child: ElevatedButton(
-                        onPressed: _login,
+                        onPressed: _isLoggingIn ? null : _login, // Tombol non-aktif saat loading
                         style: ElevatedButton.styleFrom(
                           backgroundColor: Colors.lightBlue,
                           shape: RoundedRectangleBorder(
@@ -321,12 +327,14 @@ class _LoginInputState extends State<LoginInput> {
                           ),
                           padding: const EdgeInsets.symmetric(
                             vertical: 12,
-                          ), // Sesuaikan padding
+                          ),
                         ),
-                        child: const Text(
-                          "Masuk",
-                          style: TextStyle(color: Colors.white, fontSize: 16),
-                        ),
+                        child: _isLoggingIn 
+                            ? const SizedBox(height: 20, width: 20, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 3))
+                            : const Text(
+                                "Masuk",
+                                style: TextStyle(color: Colors.white, fontSize: 16),
+                              ),
                       ),
                     ),
                   ],
@@ -354,7 +362,7 @@ class _LoginInputState extends State<LoginInput> {
                       style: TextStyle(
                         color: Colors.blue,
                         fontWeight: FontWeight.bold,
-                      ), // Tekankan
+                      ),
                     ),
                   ),
                 ],
