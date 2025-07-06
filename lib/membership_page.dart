@@ -79,13 +79,12 @@ class _MembershipPageState extends State<MembershipPage> {
     });
   }
 
+  // --- FUNGSI INI DIPERBARUI SECARA MENYELURUH ---
   Future<void> _fetchActiveMembership() async {
     if (_currentUser == null) return;
 
-    Query query = _dbRef
-        .child('memberSchedules_badminton')
-        .orderByChild('userId')
-        .equalTo(_currentUser!.uid);
+    // PERBAIKAN 1: Ambil semua data member, jangan difilter di awal.
+    Query query = _dbRef.child('memberSchedules_badminton');
 
     try {
       DataSnapshot snapshot = await query.once().then(
@@ -96,6 +95,8 @@ class _MembershipPageState extends State<MembershipPage> {
       if (snapshot.value != null && snapshot.value is Map) {
         Map<dynamic, dynamic> schedules =
             snapshot.value as Map<dynamic, dynamic>;
+
+        // PERBAIKAN 2: Lakukan filter di sisi aplikasi (client-side)
         for (var entry in schedules.entries) {
           if (entry.value is Map) {
             try {
@@ -103,9 +104,17 @@ class _MembershipPageState extends State<MembershipPage> {
                 entry.key,
                 entry.value as Map<dynamic, dynamic>,
               );
-              if (schedule.isActive) {
+
+              // Cek kepemilikan berdasarkan userId ATAU email
+              bool isThisUserSchedule =
+                  (schedule.userId == _currentUser!.uid) ||
+                  (schedule.email == _currentUser!.email &&
+                      schedule.email.isNotEmpty);
+
+              // Jika jadwal ini milik pengguna, baru cek apakah aktif
+              if (isThisUserSchedule && schedule.isActive) {
                 foundSchedule = schedule;
-                break;
+                break; // Hentikan loop jika sudah ketemu satu yang aktif
               }
             } catch (e) {
               print(
@@ -124,7 +133,6 @@ class _MembershipPageState extends State<MembershipPage> {
     }
   }
 
-  // --- FUNGSI INI DIPERBARUI SECARA MENYELURUH ---
   Future<void> _fetchUnavailableMemberSlots() async {
     if (_selectedFieldId == null || _selectedDayOfWeek == null || !mounted) {
       if (mounted) setState(() => _unavailableMemberStartHours.clear());
@@ -158,10 +166,10 @@ class _MembershipPageState extends State<MembershipPage> {
               key,
               value as Map<dynamic, dynamic>,
             );
-            
+
             int dayOfWeekFromDB = schedule.dayOfWeek;
             if (dayOfWeekFromDB == 0) {
-              dayOfWeekFromDB = 7; // Konversi Minggu (0) ke standar Dart (7)
+              dayOfWeekFromDB = 7;
             }
 
             if (schedule.isActive &&
@@ -193,19 +201,19 @@ class _MembershipPageState extends State<MembershipPage> {
       // 2. Periksa konflik dengan booking reguler untuk 4 minggu ke depan
       List<Future> bookingChecks = [];
       DateTime checkDate = DateTime.now();
-      
+
       while (checkDate.weekday != _selectedDayOfWeek) {
         checkDate = checkDate.add(const Duration(days: 1));
       }
 
-      for (int i = 0; i < 4; i++) { // Cek untuk 4 minggu
+      for (int i = 0; i < 4; i++) {
         DateTime futureDate = checkDate.add(Duration(days: 7 * i));
         String formattedDate = DateFormat('yyyy-MM-dd').format(futureDate);
         DatabaseReference bookingPathRef = _dbRef
             .child('bookings_badminton')
             .child(_selectedFieldId!)
             .child(formattedDate);
-        
+
         bookingChecks.add(
           bookingPathRef.once().then((event) {
             final snapshot = event.snapshot;
@@ -265,7 +273,13 @@ class _MembershipPageState extends State<MembershipPage> {
 
   String _dayOfWeekToString(int day) {
     const days = [
-      "Senin", "Selasa", "Rabu", "Kamis", "Jumat", "Sabtu", "Minggu",
+      "Senin",
+      "Selasa",
+      "Rabu",
+      "Kamis",
+      "Jumat",
+      "Sabtu",
+      "Minggu",
     ];
     if (day >= 1 && day <= 7) return days[day - 1];
     return "Tidak Valid";
@@ -314,11 +328,12 @@ class _MembershipPageState extends State<MembershipPage> {
 
     final String firebaseKey =
         _dbRef.child('memberSchedules_badminton').push().key!;
-    
+
     final Map<String, dynamic> dataToSave = {
       'bookingType': 'member',
       'dayOfWeek': _selectedDayOfWeek,
-      'endTime': "${(_selectedStartHour! + _bookingDurationHours).toString().padLeft(2, '0')}:00",
+      'endTime':
+          "${(_selectedStartHour! + _bookingDurationHours).toString().padLeft(2, '0')}:00",
       'fieldId': _selectedFieldId,
       'firstDate': DateFormat('yyyy-MM-dd').format(DateTime.now()),
       'fullName': _fullName,
@@ -330,14 +345,14 @@ class _MembershipPageState extends State<MembershipPage> {
       'email': _email,
       'payment_status': 'pending',
     };
-    
+
     final String shortFieldId = _selectedFieldId!.replaceFirst('lapangan', 'L');
     final String dateForOrderId = DateFormat('yyMMdd').format(DateTime.now());
     final String orderIdSuffix = firebaseKey.substring(firebaseKey.length - 8);
     final String orderId = 'MBR-B$shortFieldId-$dateForOrderId-$orderIdSuffix';
-    
+
     dataToSave['midtrans_order_id'] = orderId;
-    
+
     final int grossAmount = 300000 * _selectedDurationMonths;
     final String firebaseMembershipPath =
         'memberSchedules_badminton/$firebaseKey';
@@ -345,14 +360,19 @@ class _MembershipPageState extends State<MembershipPage> {
     try {
       final response = await http
           .post(
-            Uri.parse('https://diazmidtransbackendtest.netlify.app/api/create-midtrans-transaction'),
-            headers: <String, String>{'Content-Type': 'application/json; charset=UTF-8'},
+            Uri.parse(
+              'https://diazmidtransbackendtest.netlify.app/api/create-midtrans-transaction',
+            ),
+            headers: <String, String>{
+              'Content-Type': 'application/json; charset=UTF-8',
+            },
             body: jsonEncode(<String, dynamic>{
               'order_id': orderId,
               'gross_amount': grossAmount,
               'user_email': _email,
               'item_id': 'MBR-B$shortFieldId-$_selectedDurationMonths',
-              'item_name': 'Membership Badminton $_selectedDurationMonths Bln - Lap ${shortFieldId.substring(1)}',
+              'item_name':
+                  'Membership Badminton $_selectedDurationMonths Bln - Lap ${shortFieldId.substring(1)}',
               'quantityitem': 1,
               'priceperitem': grossAmount,
             }),
@@ -374,23 +394,32 @@ class _MembershipPageState extends State<MembershipPage> {
           Navigator.push(
             context,
             MaterialPageRoute(
-              builder: (context) => WebViewPage(
-                snapToken: snapToken,
-                firebaseBookingPath: firebaseMembershipPath,
-              ),
+              builder:
+                  (context) => WebViewPage(
+                    snapToken: snapToken,
+                    firebaseBookingPath: firebaseMembershipPath,
+                  ),
             ),
           ).then((_) {
             if (mounted) _loadUserDataAndMembership();
           });
         } else {
           ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Gagal mendapatkan token pembayaran.'), backgroundColor: Colors.red),
+            const SnackBar(
+              content: Text('Gagal mendapatkan token pembayaran.'),
+              backgroundColor: Colors.red,
+            ),
           );
         }
       } else {
         final errorData = jsonDecode(response.body);
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error dari server: ${errorData['error'] ?? 'Gagal'}'), backgroundColor: Colors.red),
+          SnackBar(
+            content: Text(
+              'Error dari server: ${errorData['error'] ?? 'Gagal'}',
+            ),
+            backgroundColor: Colors.red,
+          ),
         );
       }
     } catch (e) {
@@ -440,9 +469,8 @@ class _MembershipPageState extends State<MembershipPage> {
     String validityInfo = "Anda belum terdaftar sebagai member.";
 
     if (isActive && _activeMemberSchedule != null) {
-      // PERBAIKAN: Konversi hari minggu untuk ditampilkan di UI
       int dayOfWeekFromDB = _activeMemberSchedule!.dayOfWeek;
-      if(dayOfWeekFromDB == 0){
+      if (dayOfWeekFromDB == 0) {
         dayOfWeekFromDB = 7;
       }
       validityInfo =
@@ -696,8 +724,9 @@ class _MembershipPageState extends State<MembershipPage> {
                   (index) {
                     final hour = _memberOpeningHour + index;
                     final bool isSelected = _selectedStartHour == hour;
-                    final bool isTaken =
-                        _unavailableMemberStartHours.contains(hour);
+                    final bool isTaken = _unavailableMemberStartHours.contains(
+                      hour,
+                    );
 
                     return ElevatedButton(
                       onPressed:
@@ -774,7 +803,7 @@ class _MembershipPageState extends State<MembershipPage> {
             style: ElevatedButton.styleFrom(
               backgroundColor: Theme.of(context).primaryColor,
               shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(12)
+                borderRadius: BorderRadius.circular(12),
               ),
               textStyle: const TextStyle(
                 fontSize: 16,
