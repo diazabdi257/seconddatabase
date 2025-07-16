@@ -1,13 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:http/http.dart' as http;
-import 'dart:async'; // Import untuk TimeoutException
+import 'dart:async';
 import 'dart:convert';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'dart:math'; // Diperlukan untuk Random
 import 'package:firebase_database/firebase_database.dart';
-import 'midtrans/midtranswebview_page.dart'; // Sesuaikan path jika berbeda
-import 'models/BookingOrder.dart'; // Impor model BookingOrder Anda
+import 'midtrans/midtranswebview_page.dart';
+import 'models/member_schedule.dart'; // Impor ini mungkin tidak digunakan langsung tapi relevan
 
 class LapanganFutsalPage extends StatefulWidget {
   const LapanganFutsalPage({Key? key}) : super(key: key);
@@ -17,112 +16,105 @@ class LapanganFutsalPage extends StatefulWidget {
 }
 
 class _LapanganFutsalPageState extends State<LapanganFutsalPage> {
-  // --- Parameter Spesifik Lapangan (UBAH INI UNTUK LAPANGAN LAIN) ---
-  final String fieldId = 'lapangan1'; //
-  final int pricePerHour = 150000; //
-  final String sportNodeName = 'bookings_futsal'; // 'bookings_futsal' untuk futsal //
-  final String orderPrefix = 'FUTSAL-L1'; // Misal 'FUTSAL-L1' untuk futsal lapangan 1 //
-  final String defaultItemIdForPayload = 'F1'; // Misal 'F1' untuk futsal lapangan 1 //
-  final String assetImagePath = 'assets/lapanganfutsal.jpg'; //
-  final String pageTitle = "Lapangan 1 - Futsal"; //
-  // --- Akhir Parameter Spesifik Lapangan ---
+  final String fieldId = 'lapangan1';
+  final int pricePerHour = 60000;
+  final String sportNodeName = 'bookings_futsal';
+  final String orderPrefix = 'FUTSAL';
+  final String defaultItemIdForPayload = 'F1';
+  final String assetImagePath = 'assets/lapanganfutsal.jpg';
+  final String pageTitle = "Lapangan 1 - Futsal";
 
-  final int openingHour = 7; //
-  final int closingHour = 22; //
-  bool _isLoading = false; //
+  final int openingHour = 7;
+  final int closingHour = 22;
+  bool _isLoading = false;
+  
+  // PERBAIKAN 1: Mengubah URL Backend
   final String _backendUrl =
-      'https://diazmidtransbackendtest.netlify.app/api/create-midtrans-transaction'; // URL Backend Anda //
+      'https://booking-gor.site/api/create-midtrans-transaction';
 
-  int selectedDateIndex = 0; //
-  List<int> selectedHourIndexes = []; //
-  int totalPrice = 0; //
-  DateTime? startTime; //
-  DateTime? endTime; //
-  DateTime? dateBooking; //
-  String fullName = ''; //
-  String email = ''; //
+  int selectedDateIndex = 0;
+  List<int> selectedHourIndexes = [];
+  int totalPrice = 0;
+  DateTime? startTime;
+  DateTime? endTime;
+  DateTime? dateBooking;
+  String fullName = '';
+  String email = '';
+  String phoneNumber = ''; // Tambahkan variabel untuk nomor HP
 
-  final DatabaseReference _databaseRef = FirebaseDatabase.instance.ref(); //
-  Set<int> _bookedHoursForSelectedDate = {}; //
-  Set<int> _memberReservedHours = {}; // Untuk menyimpan jadwal member //
-
-  String _generate19RandomChars() { //
-    const String chars =
-        'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789'; //
-    Random rnd = Random(); //
-    const int length = 19; //
-    return String.fromCharCodes( //
-      Iterable.generate( //
-        length,
-        (_) => chars.codeUnitAt(rnd.nextInt(chars.length)),
-      ),
-    );
-  }
+  final DatabaseReference _databaseRef = FirebaseDatabase.instance.ref();
+  Set<int> _bookedHoursForSelectedDate = {};
+  Set<int> _memberReservedHours = {};
 
   @override
-  void initState() { //
+  void initState() {
     super.initState();
-    _getUserDataFromSharedPreferences(); //
-    if (getUpcomingDays(21).isNotEmpty) { //
-      _fetchBookedAndMemberSlots(getUpcomingDays(21)[selectedDateIndex]); //
+    _getUserDataFromSharedPreferences();
+    if (getUpcomingDays(21).isNotEmpty) {
+      _fetchBookedAndMemberSlots(getUpcomingDays(21)[selectedDateIndex]);
     }
   }
 
-  Future<void> _getUserDataFromSharedPreferences() async { //
-    SharedPreferences prefs = await SharedPreferences.getInstance(); //
-    if (!mounted) return; //
-    setState(() { //
-      fullName = prefs.getString('fullName') ?? 'Nama Tidak Tersedia'; //
-      email = prefs.getString('email') ?? 'Email Tidak Tersedia'; //
+  Future<void> _getUserDataFromSharedPreferences() async {
+    SharedPreferences prefs = await SharedPreferences.getInstance();
+    if (!mounted) return;
+    setState(() {
+      fullName = prefs.getString('fullName') ?? 'Nama Tidak Tersedia';
+      email = prefs.getString('email') ?? 'Email Tidak Tersedia';
+      // Ambil juga nomor telepon dari SharedPreferences
+      phoneNumber = prefs.getString('phoneNumber') ?? '';
     });
   }
 
+  // ... (Fungsi _fetchBookedAndMemberSlots tidak berubah)
   Future<void> _fetchBookedAndMemberSlots(DateTime selectedDate) async {
-    if (!mounted) return; //
-    setState(() { //
-      _isLoading = true; //
-      _bookedHoursForSelectedDate.clear(); //
-      _memberReservedHours.clear(); //
+    if (!mounted) return;
+    setState(() {
+      _isLoading = true;
+      _bookedHoursForSelectedDate.clear();
+      _memberReservedHours.clear();
     });
 
-    String formattedDate = DateFormat('yyyy-MM-dd').format(selectedDate); //
-    String firebaseBookingPath = '$sportNodeName/$fieldId/$formattedDate'; //
-    String firebaseMemberPath = 'memberSchedules_futsal'; //
+    String formattedDate = DateFormat('yyyy-MM-dd').format(selectedDate);
+    String firebaseBookingPath = '$sportNodeName/$fieldId/$formattedDate';
+    String firebaseMemberPath = 'memberSchedules_futsal';
 
-    print('Fetching regular bookings from path: $firebaseBookingPath'); //
-    if (sportNodeName == 'bookings_futsal') { //
-      print('Fetching member schedules from path: $firebaseMemberPath for fieldId: $fieldId and date: $formattedDate'); //
-    }
-
-    try { //
-      Set<int> tempBookedHours = {}; //
-      Set<int> tempMemberHours = {}; //
+    try {
+      Set<int> tempBookedHours = {};
+      Set<int> tempMemberHours = {};
 
       // 1. Fetch booking biasa
-      final eventBooking = await _databaseRef.child(firebaseBookingPath).once().timeout(const Duration(seconds: 15)); //
-      final snapshotBooking = eventBooking.snapshot; //
-      if (snapshotBooking.value != null && snapshotBooking.value is Map) { //
-        Map<dynamic, dynamic> bookingsOnDate = snapshotBooking.value as Map<dynamic, dynamic>; //
-        bookingsOnDate.forEach((uniqueBookingKey, bookingData) { //
-          if (bookingData is Map) { //
-            final booking = bookingData; //
+      final eventBooking = await _databaseRef
+          .child(firebaseBookingPath)
+          .once()
+          .timeout(const Duration(seconds: 15));
+      final snapshotBooking = eventBooking.snapshot;
+      if (snapshotBooking.value != null && snapshotBooking.value is Map) {
+        Map<dynamic, dynamic> bookingsOnDate =
+            snapshotBooking.value as Map<dynamic, dynamic>;
+        bookingsOnDate.forEach((uniqueBookingKey, bookingData) {
+          if (bookingData is Map) {
+            final booking = bookingData;
+            String status =
+                (booking['status'] ?? booking['payment_status'] ?? '')
+                    .toString()
+                    .toLowerCase();
 
-            // MODIFIED: Check payment status from mobile app OR website format
-            bool isPaymentSuccess = (booking['payment_status'] == 'success' || booking['payment_status'] == 'confirmed') || //
-                                    (booking['status'] == 'success'); 
+            if (status == 'success' ||
+                status == 'confirmed' ||
+                status == 'capture') {
+              String startTimeStr = booking['startTime']?.toString() ?? '';
+              String endTimeStr = booking['endTime']?.toString() ?? '';
 
-            if (isPaymentSuccess) { //
-              String startTimeStr = booking['startTime']?.toString() ?? ''; //
-              String endTimeStr = booking['endTime']?.toString() ?? ''; //
-              if (startTimeStr.isNotEmpty && endTimeStr.isNotEmpty) { //
-                List<String> startParts = startTimeStr.split(':'); //
-                List<String> endParts = endTimeStr.split(':'); //
-                if (startParts.length == 2 && endParts.length == 2) { //
-                  DateTime bookingStartTime = DateTime(selectedDate.year, selectedDate.month, selectedDate.day, int.tryParse(startParts[0]) ?? 0, int.tryParse(startParts[1]) ?? 0); //
-                  DateTime bookingEndTime = DateTime(selectedDate.year, selectedDate.month, selectedDate.day, int.tryParse(endParts[0]) ?? 0, int.tryParse(endParts[1]) ?? 0); //
-                  for (int hour = bookingStartTime.hour; hour < bookingEndTime.hour; hour++) { //
-                    tempBookedHours.add(hour); //
+              if (startTimeStr.isNotEmpty && endTimeStr.isNotEmpty) {
+                try {
+                  DateTime bookingStartTime = DateTime(selectedDate.year, selectedDate.month, selectedDate.day, int.parse(startTimeStr.split(':')[0]));
+                  DateTime bookingEndTime = DateTime(selectedDate.year, selectedDate.month, selectedDate.day, int.parse(endTimeStr.split(':')[0]));
+                  for (int hour = bookingStartTime.hour; hour < bookingEndTime.hour; hour++) {
+                    tempBookedHours.add(hour);
                   }
+                } catch (e) {
+                  print("Could not parse time for booking $uniqueBookingKey. Error: $e");
                 }
               }
             }
@@ -130,277 +122,260 @@ class _LapanganFutsalPageState extends State<LapanganFutsalPage> {
         });
       }
 
-      // 2. Fetch jadwal member (HANYA JIKA SPORTNYA futsal, SESUAIKAN JIKA PERLU UNTUK FUTSAL)
-      if (sportNodeName == 'bookings_futsal') { //
-        Query memberQuery = _databaseRef.child(firebaseMemberPath).orderByChild('fieldId').equalTo(fieldId); //
-        final eventMember = await memberQuery.once().timeout(const Duration(seconds: 15)); //
-        final snapshotMember = eventMember.snapshot; //
+      // 2. Fetch jadwal member
+      Query memberQuery = _databaseRef.child(firebaseMemberPath).orderByChild('fieldId').equalTo(fieldId);
+      final eventMember = await memberQuery.once().timeout(const Duration(seconds: 15));
+      final snapshotMember = eventMember.snapshot;
 
-        if (snapshotMember.value != null && snapshotMember.value is Map) { //
-          Map<dynamic, dynamic> memberSchedules = snapshotMember.value as Map<dynamic, dynamic>; //
-          memberSchedules.forEach((key, value) { //
-            if (value is Map) { //
-              final scheduleMap = value as Map<dynamic, dynamic>; //
-              String schedulePaymentStatus = scheduleMap['payment_status'] ?? 'pending'; //
-              int scheduleDayOfWeek = (scheduleMap['dayOfWeek'] as num?)?.toInt() ?? 0; //
-              String scheduleFirstDateStr = scheduleMap['firstDate'] ?? ''; //
-              int scheduleValidityMonths = (scheduleMap['validityMonths'] as num?)?.toInt() ?? 0; //
-              String scheduleStartTimeStr = scheduleMap['startTime'] ?? ''; //
-              String scheduleEndTimeStr = scheduleMap['endTime'] ?? ''; //
-              
-              bool isActiveMemberSchedule = (schedulePaymentStatus == 'success' || schedulePaymentStatus == 'confirmed'); //
+      if (snapshotMember.value != null && snapshotMember.value is Map) {
+          Map<dynamic, dynamic> memberSchedules = snapshotMember.value as Map<dynamic, dynamic>;
+          memberSchedules.forEach((key, value) {
+              if (value is Map) {
+                  final scheduleMap = value as Map<dynamic, dynamic>;
+                  
+                  String bookingType = (scheduleMap['bookingType'] ?? '').toString().toLowerCase();
+                  String status = (scheduleMap['status'] ?? scheduleMap['payment_status'] ?? '').toString().toLowerCase();
+                  bool isPaid = status == 'success' || status == 'confirmed';
+                  bool isActiveMemberSchedule = (bookingType == 'admin' || isPaid);
 
-              if (isActiveMemberSchedule && scheduleDayOfWeek == selectedDate.weekday && scheduleFirstDateStr.isNotEmpty) { //
-                DateTime firstDate = DateFormat('yyyy-MM-dd').parse(scheduleFirstDateStr); //
-                DateTime memberScheduleEndDate = DateTime(firstDate.year, firstDate.month + scheduleValidityMonths, firstDate.day); //
+                  if (isActiveMemberSchedule) {
+                      int scheduleDayOfWeek = (scheduleMap['dayOfWeek'] as num?)?.toInt() ?? 0;
 
-                if (!selectedDate.isBefore(firstDate) && selectedDate.isBefore(memberScheduleEndDate)) { //
-                  if (scheduleStartTimeStr.isNotEmpty && scheduleEndTimeStr.isNotEmpty) { //
-                     List<String> startParts = scheduleStartTimeStr.split(':'); //
-                     List<String> endParts = scheduleEndTimeStr.split(':'); //
-                     if (startParts.length == 2 && endParts.length == 2) { //
-                        int startHour = int.tryParse(startParts[0]) ?? 0; //
-                        // int endHour = int.tryParse(endParts[0]) ?? 0; // Variabel endHour tidak terpakai di loop bawahnya
-                        
-                        DateTime memberSlotStartTime = DateTime(selectedDate.year,selectedDate.month,selectedDate.day, startHour, int.tryParse(startParts[1])??0); //
-                        DateTime memberSlotEndTime = DateTime(selectedDate.year,selectedDate.month,selectedDate.day, int.tryParse(endParts[0])??0, int.tryParse(endParts[1])??0); //
+                      int dayOfWeekFromDB = scheduleDayOfWeek;
+                      if (dayOfWeekFromDB == 0) {
+                          dayOfWeekFromDB = 7; 
+                      }
+                      
+                      if (dayOfWeekFromDB == selectedDate.weekday) {
+                          String firstDateStr = scheduleMap['firstDate'] ?? '';
+                          int validityMonths = (scheduleMap['validityMonths'] as num?)?.toInt() ?? 0;
 
-                        for (int hour = memberSlotStartTime.hour; hour < memberSlotEndTime.hour; hour++) { //
-                            tempMemberHours.add(hour); //
-                        }
-                     }
+                          if (firstDateStr.isNotEmpty && validityMonths > 0) {
+                              try {
+                                  DateTime firstDate = DateFormat('yyyy-MM-dd').parse(firstDateStr);
+                                  DateTime memberScheduleEndDate = DateTime(firstDate.year, firstDate.month + validityMonths, firstDate.day);
+
+                                  if (!selectedDate.isBefore(firstDate) && selectedDate.isBefore(memberScheduleEndDate)) {
+                                      String scheduleStartTimeStr = scheduleMap['startTime'] ?? '';
+                                      String scheduleEndTimeStr = scheduleMap['endTime'] ?? '';
+
+                                      if (scheduleStartTimeStr.isNotEmpty && scheduleEndTimeStr.isNotEmpty) {
+                                          int startHour = int.parse(scheduleStartTimeStr.split(':')[0]);
+                                          int endHour = int.parse(scheduleEndTimeStr.split(':')[0]);
+
+                                          for (int hour = startHour; hour < endHour; hour++) {
+                                              tempMemberHours.add(hour);
+                                          }
+                                      }
+                                  }
+                              } catch (e) {
+                                  print("Error parsing member schedule date for key $key: $e");
+                              }
+                          }
+                      }
                   }
-                }
               }
-            }
           });
-        }
       }
 
-      if (mounted) { //
-        setState(() { //
-          _bookedHoursForSelectedDate = tempBookedHours; //
-          _memberReservedHours = tempMemberHours; //
+      if (mounted) {
+        setState(() {
+          _bookedHoursForSelectedDate = tempBookedHours;
+          _memberReservedHours = tempMemberHours;
         });
       }
-    } on TimeoutException catch (_) { //
-        print('Error fetching slots: Timeout'); //
-        if (mounted) { //
-        ScaffoldMessenger.of(context).showSnackBar( //
-            const SnackBar(content: Text('Gagal memuat jadwal: Server tidak merespons.'), backgroundColor: Colors.orange), //
-        );
-        }
-    } catch (e) { //
-      print('Error fetching slots: $e'); //
-      if (mounted) { //
-        ScaffoldMessenger.of(context).showSnackBar( //
-          SnackBar(content: Text('Gagal memuat jadwal: ${e.toString()}')), //
-        );
-      }
-    } finally { //
-      if (mounted) { //
-        setState(() { //
-          _isLoading = false; //
+    } catch (e) {
+      print('Error fetching slots: $e');
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isLoading = false;
         });
       }
     }
   }
 
 
-  Future<void> _saveBookingToFirebase({ //
-    required Map<String, dynamic> bookingData, //
-    required String fieldIdValue, //
-    required String bookingDateValue, //
-    required String bookingKeyValue, //
-  }) async {
-    try { //
-      String firebasePath = '$sportNodeName/$fieldIdValue/$bookingDateValue/$bookingKeyValue'; //
-      await _databaseRef.child(firebasePath).set(bookingData).timeout(const Duration(seconds:10)); //
-      print('Booking data saved to Firebase successfully! Path: $firebasePath'); //
-    } on TimeoutException catch(_){ //
-       print('Failed to save booking data to Firebase: Timeout'); //
-        if (mounted) { //
-        ScaffoldMessenger.of(context).showSnackBar( //
-            const SnackBar(content: Text('Gagal menyimpan booking: Server tidak merespons'), backgroundColor: Colors.red), //
-        );
+  // --- PERBAIKAN 2: Mengubah struktur body JSON pada fungsi ini ---
+  Future<void> _initiatePayment() async {
+    if (dateBooking == null ||
+        startTime == null ||
+        endTime == null ||
+        email.isEmpty) {
+      return;
+    }
+
+    if (!mounted) return;
+    setState(() {
+      _isLoading = true;
+    });
+
+    String formattedDateForPath = DateFormat('yyyy-MM-dd').format(dateBooking!);
+    DatabaseReference newBookingRef =
+        _databaseRef
+            .child(sportNodeName)
+            .child(fieldId)
+            .child(formattedDateForPath)
+            .push();
+
+    String firebaseKey = newBookingRef.key!;
+    String dateForOrderId = DateFormat('yyyyMMdd').format(dateBooking!);
+    String orderIdForMidtrans = '$orderPrefix-$dateForOrderId$firebaseKey';
+
+    String itemName = 'Sewa ${pageTitle.split(" - ").join(" ")} (${selectedHourIndexes.length} Jam)';
+    
+    // Menyusun item_details
+    List<Map<String, dynamic>> itemDetails = [
+      {
+        "id": defaultItemIdForPayload,
+        "price": pricePerHour,
+        "quantity": selectedHourIndexes.length,
+        "name": itemName
+      }
+    ];
+
+    // Menyusun customer_details
+    Map<String, String> customerDetails = {
+      "first_name": fullName.split(' ').first,
+      "last_name": fullName.split(' ').length > 1 ? fullName.split(' ').sublist(1).join(' ') : "",
+      "email": email,
+      "phone": phoneNumber
+    };
+
+    // Menyusun body JSON yang baru
+    Map<String, dynamic> transactionData = {
+      "order_id": orderIdForMidtrans,
+      "gross_amount": totalPrice,
+      "user_email": email,
+      "item_details": itemDetails,
+      "customer_details": customerDetails
+    };
+
+    Map<String, dynamic> bookingDataForFirebase = {
+      'bookingDate': formattedDateForPath,
+      'endTime': DateFormat('HH:mm').format(endTime!),
+      'fieldId': fieldId,
+      'fullName': fullName,
+      'gross_amount': totalPrice,
+      'key': firebaseKey,
+      'midtrans_order_id': orderIdForMidtrans,
+      'phoneNumber': phoneNumber,
+      'scheduleChangeCount': 1,
+      'startTime': DateFormat('HH:mm').format(startTime!),
+      'status': 'pending',
+      'timestamp': ServerValue.timestamp,
+      'userName': email,
+    };
+
+    try {
+      final response = await http
+          .post(
+            Uri.parse(_backendUrl),
+            headers: <String, String>{
+              'Content-Type': 'application/json; charset=UTF-8',
+            },
+            body: jsonEncode(transactionData), // Mengirim body JSON yang baru
+          )
+          .timeout(const Duration(seconds: 20));
+
+      if (mounted) {
+        if (response.statusCode == 200) {
+          final responseData = jsonDecode(response.body);
+          final String? snapToken = responseData['snapToken'];
+          if (snapToken != null) {
+            await newBookingRef.set(bookingDataForFirebase).timeout(const Duration(seconds:10));
+            Navigator.push(
+              context,
+              MaterialPageRoute(
+                builder:
+                    (context) => WebViewPage(
+                      snapToken: snapToken,
+                      firebaseBookingPath: newBookingRef.path,
+                    ),
+              ),
+            );
+          } else {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text('Gagal mendapatkan token pembayaran.'),
+                backgroundColor: Colors.red,
+              ),
+            );
+          }
+        } else {
+          final errorData = jsonDecode(response.body);
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(
+                'Error dari server: ${errorData['error'] ?? 'Gagal membuat transaksi'}',
+              ),
+              backgroundColor: Colors.red,
+            ),
+          );
         }
-    } 
-    catch (e) { //
-      print('Failed to save booking data to Firebase: $e'); //
-      if (mounted) { //
-        ScaffoldMessenger.of(context).showSnackBar( //
-          SnackBar( //
-            content: Text('Gagal menyimpan detail booking: ${e.toString()}'), //
-            backgroundColor: Colors.red, //
+      }
+    } catch (e) {
+      if (mounted)
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Terjadi kesalahan koneksi: ${e.toString()}'),
+            backgroundColor: Colors.red,
           ),
         );
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isLoading = false;
+        });
       }
     }
   }
 
-  Future<void> _initiatePayment() async { //
-    print("--- _initiatePayment: START for $fieldId ---"); //
-    if (dateBooking == null || startTime == null || endTime == null) { //
-      print("_initiatePayment: ERROR - Tanggal/waktu booking belum lengkap."); //
-      if (mounted) { /* ... SnackBar ... */ } //
-      return; //
-    }
-    if (email.isEmpty || email == 'Email Tidak Tersedia') { //
-      print("_initiatePayment: ERROR - Email pengguna tidak valid."); //
-      if (mounted) { /* ... SnackBar ... */ } //
-      return; //
-    }
-    if (totalPrice <= 0) { //
-      print("_initiatePayment: ERROR - Total harga tidak valid."); //
-      if (mounted) { /* ... SnackBar ... */ } //
-      return; //
-    }
-
-    if (!mounted) return; //
-    setState(() { _isLoading = true; }); //
-    print("_initiatePayment: _isLoading set to true."); //
-
-    String pureRandomChars = _generate19RandomChars(); //
-    String randomKey = "-$pureRandomChars";  //
-    String orderIdForMidtrans = '$orderPrefix-${DateFormat('yyyyMMdd').format(dateBooking!)}$randomKey'; //
-    
-    String itemNameForPayload = 'Booking ${pageTitle.split(" - ")[0]} (${selectedHourIndexes.length} Jam)'; //
-
-    String formattedStartTimeForBackend = DateFormat('HH:mm').format(startTime!); //
-    String formattedEndTimeForBackend = DateFormat('HH:mm').format(endTime!); //
-    String formattedDateBookingForBackend = DateFormat('yyyy-MM-dd').format(dateBooking!); //
-
-    String bookingDateForFirebase = DateFormat('yyyy-MM-dd').format(dateBooking!); //
-    String startTimeForFirebase = DateFormat('HH:mm').format(startTime!);  //
-    String endTimeForFirebase = DateFormat('HH:mm').format(endTime!);      //
-    String keyForFirebase = randomKey;  //
-
-    Map<String, dynamic> bookingDataForFirebase = { //
-      'B_id': orderIdForMidtrans, //
-      'bookingDate': bookingDateForFirebase, //
-      'endTime': endTimeForFirebase, //
-      'fieldId': fieldId,  //
-      'gross_amount': totalPrice, //
-      'key': keyForFirebase, //
-      'midtrans_order_id': orderIdForMidtrans, //
-      'startTime': startTimeForFirebase, //
-      'timestamp': ServerValue.timestamp,  //
-      'userName': email, //
-      'payment_status': 'pending',  //
-      'scheduleChangeCount': 1, // Default kesempatan ganti jadwal //
-    };
-    String firebaseBookingPathForWebView = '$sportNodeName/$fieldId/$bookingDateForFirebase/$randomKey'; //
-
-    try { //
-      print("_initiatePayment: Making HTTP POST request to backend: $_backendUrl"); //
-      final response = await http.post( //
-        Uri.parse(_backendUrl), //
-        headers: <String, String>{'Content-Type': 'application/json; charset=UTF-8'}, //
-        body: jsonEncode(<String, dynamic>{ //
-          'order_id': orderIdForMidtrans, //
-          'gross_amount': totalPrice, //
-          'user_email': email, //
-          'item_id': defaultItemIdForPayload,  //
-          'item_name': itemNameForPayload,  //
-          'quantityitem': selectedHourIndexes.length,  //
-          'priceperitem': pricePerHour,  //
-          'start_time_info': formattedStartTimeForBackend,  //
-          'end_time_info': formattedEndTimeForBackend,      //
-          'booking_date_info': formattedDateBookingForBackend,  //
-        }),
-      ).timeout(const Duration(seconds: 20)); //
-      print("_initiatePayment: Backend response statusCode: ${response.statusCode}"); //
-
-      if (mounted) { //
-        if (response.statusCode == 200) { //
-          final responseData = jsonDecode(response.body); //
-          final String? snapToken = responseData['snapToken']; //
-          print("_initiatePayment: SnapToken received: $snapToken"); //
-
-          if (snapToken != null) { //
-            print("_initiatePayment: Attempting to save to Firebase..."); //
-            await _saveBookingToFirebase( //
-              bookingData: bookingDataForFirebase, //
-              fieldIdValue: fieldId, //
-              bookingDateValue: bookingDateForFirebase, //
-              bookingKeyValue: randomKey //
-            );
-            print("_initiatePayment: Firebase save logic completed. Navigating to WebViewPage..."); //
-            Navigator.push( //
-              context,
-              MaterialPageRoute(builder: (context) => WebViewPage( //
-                snapToken: snapToken, //
-                firebaseBookingPath: firebaseBookingPathForWebView, //
-                )),
-            );
-          } else {  //
-            print("_initiatePayment: ERROR - SnapToken is null."); //
-            ScaffoldMessenger.of(context).showSnackBar( //
-              const SnackBar(content: Text('Gagal mendapatkan Snap Token dari backend.'), backgroundColor: Colors.red), //
-            );
-          }
-        } else {  //
-            print("_initiatePayment: ERROR - Backend responded with ${response.statusCode}. Body: ${response.body}"); //
-            final errorData = jsonDecode(response.body); //
-            ScaffoldMessenger.of(context).showSnackBar( //
-              SnackBar(content: Text('Error dari server: ${errorData['error'] ?? 'Gagal membuat transaksi'}'), backgroundColor: Colors.red), //
-            );
-        }
-      }
-    } on TimeoutException catch (e) { //
-      print("_initiatePayment: ERROR - TimeoutException: $e"); //
-      if (mounted) { //
-        ScaffoldMessenger.of(context).showSnackBar( //
-          const SnackBar(content: Text('Koneksi ke server timeout. Silakan coba lagi.'), backgroundColor: Colors.red), //
-        );
-      }
-    } catch (e) {  //
-      print("_initiatePayment: ERROR - General Exception: $e"); //
-      if (mounted) { //
-        ScaffoldMessenger.of(context).showSnackBar( //
-          SnackBar(content: Text('Terjadi kesalahan: ${e.toString()}'), backgroundColor: Colors.red), //
-        );
-      }
-    } 
-    finally {  //
-      print("_initiatePayment: FINALLY block. Setting _isLoading to false."); //
-      if (mounted) {  //
-        setState(() { _isLoading = false; });  //
-      } 
-    }
-    print("--- _initiatePayment: END for $fieldId ---"); //
+  // ... (Sisa kode tidak berubah)
+  List<DateTime> getUpcomingDays(int days) {
+    final today = DateTime.now();
+    return List.generate(days, (index) => today.add(Duration(days: index)));
   }
 
-  List<DateTime> getUpcomingDays(int days) { //
-    final today = DateTime.now(); //
-    return List.generate(days, (index) => today.add(Duration(days: index))); //
+  bool isSequentialSelection(List<int> selected) {
+    if (selected.length <= 1) return true;
+    selected.sort();
+    for (int i = 1; i < selected.length; i++) {
+      if (selected[i] != selected[i - 1] + 1) return false;
+    }
+    return true;
   }
 
-  bool isSequentialSelection(List<int> selected) { //
-    if (selected.length <= 1) return true; //
-    selected.sort(); //
-    for (int i = 1; i < selected.length; i++) { //
-      if (selected[i] != selected[i - 1] + 1) return false; //
+  void _updateBookingTimesAndDate() {
+    final upcomingDates = getUpcomingDays(21);
+    if (selectedHourIndexes.isNotEmpty) {
+      selectedHourIndexes.sort();
+      final DateTime selectedDate = upcomingDates[selectedDateIndex];
+      dateBooking = DateTime(
+        selectedDate.year,
+        selectedDate.month,
+        selectedDate.day,
+      );
+      startTime = DateTime(
+        selectedDate.year,
+        selectedDate.month,
+        selectedDate.day,
+        openingHour + selectedHourIndexes.first,
+      );
+      endTime = DateTime(
+        selectedDate.year,
+        selectedDate.month,
+        selectedDate.day,
+        openingHour + selectedHourIndexes.last + 1,
+      );
+    } else {
+      startTime = null;
+      endTime = null;
+      dateBooking = null;
     }
-    return true; //
-  }
-
-  void _updateBookingTimesAndDate() { //
-    final upcomingDates = getUpcomingDays(21); //
-    if (selectedHourIndexes.isNotEmpty) { //
-      selectedHourIndexes.sort(); //
-      final DateTime selectedDate = upcomingDates[selectedDateIndex]; //
-      dateBooking = DateTime(selectedDate.year, selectedDate.month, selectedDate.day); //
-      startTime = DateTime(selectedDate.year, selectedDate.month, selectedDate.day, openingHour + selectedHourIndexes.first); //
-      endTime = DateTime(selectedDate.year, selectedDate.month, selectedDate.day, openingHour + selectedHourIndexes.last + 1); //
-    } else { //
-      startTime = null; //
-      endTime = null; //
-      dateBooking = null; //
-    }
-    if(mounted){ //
-      setState(() { //
-        totalPrice = pricePerHour * selectedHourIndexes.length; //
+    if (mounted) {
+      setState(() {
+        totalPrice = pricePerHour * selectedHourIndexes.length;
       });
     }
   }

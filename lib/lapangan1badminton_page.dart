@@ -16,7 +16,6 @@ class Lapangan1BadmintonPage extends StatefulWidget {
 }
 
 class _Lapangan1BadmintonPageState extends State<Lapangan1BadmintonPage> {
-  // --- Parameter Spesifik Lapangan ---
   final String fieldId = 'lapangan1';
   final int pricePerHour = 60000;
   final String sportNodeName = 'bookings_badminton';
@@ -25,12 +24,13 @@ class _Lapangan1BadmintonPageState extends State<Lapangan1BadmintonPage> {
   final String assetImagePath = 'assets/lapangan1badminton.jpg';
   final String pageTitle = "Lapangan 1 - Badminton";
 
-  // --- State & Variabel Lainnya ---
   final int openingHour = 7;
   final int closingHour = 22;
   bool _isLoading = false;
+  
+  // PERBAIKAN 1: Mengubah URL Backend
   final String _backendUrl =
-      'https://diazmidtransbackendtest.netlify.app/api/create-midtrans-transaction';
+      'https://booking-gor.site/api/create-midtrans-transaction';
 
   int selectedDateIndex = 0;
   List<int> selectedHourIndexes = [];
@@ -40,6 +40,7 @@ class _Lapangan1BadmintonPageState extends State<Lapangan1BadmintonPage> {
   DateTime? dateBooking;
   String fullName = '';
   String email = '';
+  String phoneNumber = ''; // Tambahkan variabel untuk nomor HP
 
   final DatabaseReference _databaseRef = FirebaseDatabase.instance.ref();
   Set<int> _bookedHoursForSelectedDate = {};
@@ -60,9 +61,12 @@ class _Lapangan1BadmintonPageState extends State<Lapangan1BadmintonPage> {
     setState(() {
       fullName = prefs.getString('fullName') ?? 'Nama Tidak Tersedia';
       email = prefs.getString('email') ?? 'Email Tidak Tersedia';
+      // Ambil juga nomor telepon dari SharedPreferences
+      phoneNumber = prefs.getString('phoneNumber') ?? '';
     });
   }
 
+  // ... (Fungsi _fetchBookedAndMemberSlots tidak berubah)
   Future<void> _fetchBookedAndMemberSlots(DateTime selectedDate) async {
     if (!mounted) return;
     setState(() {
@@ -74,9 +78,6 @@ class _Lapangan1BadmintonPageState extends State<Lapangan1BadmintonPage> {
     String formattedDate = DateFormat('yyyy-MM-dd').format(selectedDate);
     String firebaseBookingPath = '$sportNodeName/$fieldId/$formattedDate';
     String firebaseMemberPath = 'memberSchedules_badminton';
-
-    print('Fetching regular bookings from path: $firebaseBookingPath');
-    print('Fetching member schedules from path: $firebaseMemberPath');
 
     try {
       Set<int> tempBookedHours = {};
@@ -132,19 +133,17 @@ class _Lapangan1BadmintonPageState extends State<Lapangan1BadmintonPage> {
               if (value is Map) {
                   final scheduleMap = value as Map<dynamic, dynamic>;
                   
-                  // --- PERBAIKAN LOGIKA STATUS MEMBER ---
                   String bookingType = (scheduleMap['bookingType'] ?? '').toString().toLowerCase();
                   String status = (scheduleMap['status'] ?? scheduleMap['payment_status'] ?? '').toString().toLowerCase();
                   bool isPaid = status == 'success' || status == 'confirmed';
                   bool isActiveMemberSchedule = (bookingType == 'admin' || isPaid);
-                  // --- AKHIR PERBAIKAN ---
 
                   if (isActiveMemberSchedule) {
                       int scheduleDayOfWeek = (scheduleMap['dayOfWeek'] as num?)?.toInt() ?? 0;
 
                       int dayOfWeekFromDB = scheduleDayOfWeek;
                       if (dayOfWeekFromDB == 0) {
-                          dayOfWeekFromDB = 7;
+                          dayOfWeekFromDB = 7; 
                       }
                       
                       if (dayOfWeekFromDB == selectedDate.weekday) {
@@ -187,9 +186,6 @@ class _Lapangan1BadmintonPageState extends State<Lapangan1BadmintonPage> {
       }
     } catch (e) {
       print('Error fetching slots: $e');
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Gagal memuat jadwal: ${e.toString()}')));
-      }
     } finally {
       if (mounted) {
         setState(() {
@@ -199,17 +195,8 @@ class _Lapangan1BadmintonPageState extends State<Lapangan1BadmintonPage> {
     }
   }
 
-  Future<void> _saveBookingToFirebase({
-    required DatabaseReference bookingRef,
-    required Map<String, dynamic> bookingData,
-  }) async {
-    try {
-      await bookingRef.set(bookingData).timeout(const Duration(seconds: 10));
-    } catch (e) {
-      print('Failed to save booking data to Firebase: $e');
-    }
-  }
 
+  // --- PERBAIKAN 2: Mengubah struktur body JSON pada fungsi ini ---
   Future<void> _initiatePayment() async {
     if (dateBooking == null ||
         startTime == null ||
@@ -235,8 +222,34 @@ class _Lapangan1BadmintonPageState extends State<Lapangan1BadmintonPage> {
     String dateForOrderId = DateFormat('yyyyMMdd').format(dateBooking!);
     String orderIdForMidtrans = '$orderPrefix-$dateForOrderId$firebaseKey';
 
-    String itemNameForPayload =
-        'Booking ${pageTitle.split(" - ")[0]} (${selectedHourIndexes.length} Jam)';
+    String itemName = 'Sewa ${pageTitle.split(" - ").join(" ")} (${selectedHourIndexes.length} Jam)';
+    
+    // Menyusun item_details
+    List<Map<String, dynamic>> itemDetails = [
+      {
+        "id": defaultItemIdForPayload,
+        "price": pricePerHour,
+        "quantity": selectedHourIndexes.length,
+        "name": itemName
+      }
+    ];
+
+    // Menyusun customer_details
+    Map<String, String> customerDetails = {
+      "first_name": fullName.split(' ').first,
+      "last_name": fullName.split(' ').length > 1 ? fullName.split(' ').sublist(1).join(' ') : "",
+      "email": email,
+      "phone": phoneNumber
+    };
+
+    // Menyusun body JSON yang baru
+    Map<String, dynamic> transactionData = {
+      "order_id": orderIdForMidtrans,
+      "gross_amount": totalPrice,
+      "user_email": email,
+      "item_details": itemDetails,
+      "customer_details": customerDetails
+    };
 
     Map<String, dynamic> bookingDataForFirebase = {
       'bookingDate': formattedDateForPath,
@@ -246,7 +259,7 @@ class _Lapangan1BadmintonPageState extends State<Lapangan1BadmintonPage> {
       'gross_amount': totalPrice,
       'key': firebaseKey,
       'midtrans_order_id': orderIdForMidtrans,
-      'phoneNumber': "",
+      'phoneNumber': phoneNumber,
       'scheduleChangeCount': 1,
       'startTime': DateFormat('HH:mm').format(startTime!),
       'status': 'pending',
@@ -261,15 +274,7 @@ class _Lapangan1BadmintonPageState extends State<Lapangan1BadmintonPage> {
             headers: <String, String>{
               'Content-Type': 'application/json; charset=UTF-8',
             },
-            body: jsonEncode(<String, dynamic>{
-              'order_id': orderIdForMidtrans,
-              'gross_amount': totalPrice,
-              'user_email': email,
-              'item_id': defaultItemIdForPayload,
-              'item_name': itemNameForPayload,
-              'quantityitem': selectedHourIndexes.length,
-              'priceperitem': pricePerHour,
-            }),
+            body: jsonEncode(transactionData), // Mengirim body JSON yang baru
           )
           .timeout(const Duration(seconds: 20));
 
@@ -278,10 +283,7 @@ class _Lapangan1BadmintonPageState extends State<Lapangan1BadmintonPage> {
           final responseData = jsonDecode(response.body);
           final String? snapToken = responseData['snapToken'];
           if (snapToken != null) {
-            await _saveBookingToFirebase(
-              bookingRef: newBookingRef,
-              bookingData: bookingDataForFirebase,
-            );
+            await newBookingRef.set(bookingDataForFirebase).timeout(const Duration(seconds:10));
             Navigator.push(
               context,
               MaterialPageRoute(
@@ -329,6 +331,7 @@ class _Lapangan1BadmintonPageState extends State<Lapangan1BadmintonPage> {
     }
   }
 
+  // ... (Sisa kode tidak berubah)
   List<DateTime> getUpcomingDays(int days) {
     final today = DateTime.now();
     return List.generate(days, (index) => today.add(Duration(days: index)));
