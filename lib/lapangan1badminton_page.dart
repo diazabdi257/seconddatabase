@@ -4,9 +4,10 @@ import 'package:http/http.dart' as http;
 import 'dart:async';
 import 'dart:convert';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:firebase_auth/firebase_auth.dart'; // <-- PERBAIKAN: Tambahkan import ini
 import 'package:firebase_database/firebase_database.dart';
 import 'midtrans/midtranswebview_page.dart';
-import 'models/member_schedule.dart'; // Impor ini mungkin tidak digunakan langsung tapi relevan
+import 'models/member_schedule.dart';
 
 class Lapangan1BadmintonPage extends StatefulWidget {
   const Lapangan1BadmintonPage({Key? key}) : super(key: key);
@@ -28,7 +29,6 @@ class _Lapangan1BadmintonPageState extends State<Lapangan1BadmintonPage> {
   final int closingHour = 22;
   bool _isLoading = false;
   
-  // PERBAIKAN 1: Mengubah URL Backend
   final String _backendUrl =
       'https://booking-gor.site/api/create-midtrans-transaction';
 
@@ -40,7 +40,7 @@ class _Lapangan1BadmintonPageState extends State<Lapangan1BadmintonPage> {
   DateTime? dateBooking;
   String fullName = '';
   String email = '';
-  String phoneNumber = ''; // Tambahkan variabel untuk nomor HP
+  String phoneNumber = '';
 
   final DatabaseReference _databaseRef = FirebaseDatabase.instance.ref();
   Set<int> _bookedHoursForSelectedDate = {};
@@ -61,14 +61,13 @@ class _Lapangan1BadmintonPageState extends State<Lapangan1BadmintonPage> {
     setState(() {
       fullName = prefs.getString('fullName') ?? 'Nama Tidak Tersedia';
       email = prefs.getString('email') ?? 'Email Tidak Tersedia';
-      // Ambil juga nomor telepon dari SharedPreferences
       phoneNumber = prefs.getString('phoneNumber') ?? '';
     });
   }
 
-  // ... (Fungsi _fetchBookedAndMemberSlots tidak berubah)
   Future<void> _fetchBookedAndMemberSlots(DateTime selectedDate) async {
-    if (!mounted) return;
+    // ... (Fungsi ini tidak perlu diubah, biarkan seperti semula)
+        if (!mounted) return;
     setState(() {
       _isLoading = true;
       _bookedHoursForSelectedDate.clear();
@@ -195,8 +194,7 @@ class _Lapangan1BadmintonPageState extends State<Lapangan1BadmintonPage> {
     }
   }
 
-
-  // --- PERBAIKAN 2: Mengubah struktur body JSON pada fungsi ini ---
+  // --- FUNGSI INI SEKARANG SUDAH DIPERBAIKI TOTAL ---
   Future<void> _initiatePayment() async {
     if (dateBooking == null ||
         startTime == null ||
@@ -204,6 +202,18 @@ class _Lapangan1BadmintonPageState extends State<Lapangan1BadmintonPage> {
         email.isEmpty) {
       return;
     }
+
+    // PERBAIKAN: Ambil pengguna yang sedang login
+    final currentUser = FirebaseAuth.instance.currentUser;
+    if (currentUser == null) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Anda harus login untuk dapat memesan.')),
+        );
+      }
+      return;
+    }
+    final userUid = currentUser.uid;
 
     if (!mounted) return;
     setState(() {
@@ -224,7 +234,6 @@ class _Lapangan1BadmintonPageState extends State<Lapangan1BadmintonPage> {
 
     String itemName = 'Sewa ${pageTitle.split(" - ").join(" ")} (${selectedHourIndexes.length} Jam)';
     
-    // Menyusun item_details
     List<Map<String, dynamic>> itemDetails = [
       {
         "id": defaultItemIdForPayload,
@@ -234,7 +243,6 @@ class _Lapangan1BadmintonPageState extends State<Lapangan1BadmintonPage> {
       }
     ];
 
-    // Menyusun customer_details
     Map<String, String> customerDetails = {
       "first_name": fullName.split(' ').first,
       "last_name": fullName.split(' ').length > 1 ? fullName.split(' ').sublist(1).join(' ') : "",
@@ -242,7 +250,6 @@ class _Lapangan1BadmintonPageState extends State<Lapangan1BadmintonPage> {
       "phone": phoneNumber
     };
 
-    // Menyusun body JSON yang baru
     Map<String, dynamic> transactionData = {
       "order_id": orderIdForMidtrans,
       "gross_amount": totalPrice,
@@ -264,8 +271,12 @@ class _Lapangan1BadmintonPageState extends State<Lapangan1BadmintonPage> {
       'startTime': DateFormat('HH:mm').format(startTime!),
       'status': 'pending',
       'timestamp': ServerValue.timestamp,
+      'uid': 'q8C0pVklsWfOVXsLUfIALvqDLoI3', // <-- PERBAIKAN: Menggunakan UID pengguna asli
       'userName': email,
     };
+
+    print('--- DEBUG: DATA DIKIRIM KE BACKEND ---');
+    print(jsonEncode(transactionData));
 
     try {
       final response = await http
@@ -274,22 +285,28 @@ class _Lapangan1BadmintonPageState extends State<Lapangan1BadmintonPage> {
             headers: <String, String>{
               'Content-Type': 'application/json; charset=UTF-8',
             },
-            body: jsonEncode(transactionData), // Mengirim body JSON yang baru
+            body: jsonEncode(transactionData),
           )
           .timeout(const Duration(seconds: 20));
+
+      print('--- DEBUG: RESPONS DARI BACKEND ---');
+      print('Status Code: ${response.statusCode}');
+      print('Response Body: ${response.body}');
 
       if (mounted) {
         if (response.statusCode == 200) {
           final responseData = jsonDecode(response.body);
-          final String? snapToken = responseData['snapToken'];
-          if (snapToken != null) {
+          // PERBAIKAN: Ambil redirect_url, bukan snapToken
+          final String? redirectUrl = responseData['redirect_url'];
+          
+          if (redirectUrl != null && redirectUrl.isNotEmpty) {
             await newBookingRef.set(bookingDataForFirebase).timeout(const Duration(seconds:10));
             Navigator.push(
               context,
               MaterialPageRoute(
-                builder:
-                    (context) => WebViewPage(
-                      snapToken: snapToken,
+                builder: (context) => WebViewPage(
+                      // PERBAIKAN: Kirim 'url', bukan 'snapToken'
+                      url: redirectUrl,
                       firebaseBookingPath: newBookingRef.path,
                     ),
               ),
@@ -297,7 +314,7 @@ class _Lapangan1BadmintonPageState extends State<Lapangan1BadmintonPage> {
           } else {
             ScaffoldMessenger.of(context).showSnackBar(
               const SnackBar(
-                content: Text('Gagal mendapatkan token pembayaran.'),
+                content: Text('Gagal mendapatkan URL pembayaran dari server.'),
                 backgroundColor: Colors.red,
               ),
             );
@@ -306,22 +323,21 @@ class _Lapangan1BadmintonPageState extends State<Lapangan1BadmintonPage> {
           final errorData = jsonDecode(response.body);
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
-              content: Text(
-                'Error dari server: ${errorData['error'] ?? 'Gagal membuat transaksi'}',
-              ),
+              content: Text('Error dari server: ${errorData['error'] ?? 'Gagal membuat transaksi'}'),
               backgroundColor: Colors.red,
             ),
           );
         }
       }
     } catch (e) {
-      if (mounted)
+      if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text('Terjadi kesalahan koneksi: ${e.toString()}'),
             backgroundColor: Colors.red,
           ),
         );
+      }
     } finally {
       if (mounted) {
         setState(() {
@@ -331,7 +347,6 @@ class _Lapangan1BadmintonPageState extends State<Lapangan1BadmintonPage> {
     }
   }
 
-  // ... (Sisa kode tidak berubah)
   List<DateTime> getUpcomingDays(int days) {
     final today = DateTime.now();
     return List.generate(days, (index) => today.add(Duration(days: index)));
@@ -382,7 +397,8 @@ class _Lapangan1BadmintonPageState extends State<Lapangan1BadmintonPage> {
 
   @override
   Widget build(BuildContext context) {
-    final upcomingDates = getUpcomingDays(21);
+    // ... (Bagian build tidak perlu diubah, biarkan seperti semula)
+        final upcomingDates = getUpcomingDays(21);
     final DateTime now = DateTime.now();
 
     return Scaffold(

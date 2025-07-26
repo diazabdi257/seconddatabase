@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart'; // Import FirebaseAuth
 import 'package:seconddatabase/edit_profile_page.dart';
 import 'package:shared_preferences/shared_preferences.dart'; // Import shared_preferences
+import 'package:webview_flutter/webview_flutter.dart';
 import 'login_input.dart';
 
 
@@ -85,7 +86,19 @@ class _ProfilePageState extends State<ProfilePage> {
             _profileOption(icon: Icons.edit, label: "Edit Profil", onTap: () {
               Navigator.push(context, MaterialPageRoute(builder: (context) => const EditProfilePage()));
             }),
-            _profileOption(icon: Icons.help_outline, label: "Bantuan", onTap: () {}),
+            _profileOption(icon: Icons.help_outline, label: "Bantuan", onTap: () {
+              Navigator.push(context, MaterialPageRoute(builder: (context) {
+              // Membuat WebView controller sederhana di tempat
+              final controller = WebViewController()
+                ..setJavaScriptMode(JavaScriptMode.unrestricted)
+                ..loadRequest(Uri.parse("https://flutter.dev")); // Kita coba buka situs resmi Flutter
+
+              return Scaffold(
+                appBar: AppBar(title: Text("Uji Coba WebView")),
+                body: WebViewWidget(controller: controller),
+              );
+            }));
+            }),
             _profileOption(icon: Icons.logout, label: "Keluar", onTap: () async {
               // Menghapus data pengguna dari SharedPreferences saat logout
               SharedPreferences prefs = await SharedPreferences.getInstance();
